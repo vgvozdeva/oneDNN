@@ -38,17 +38,17 @@ header:
   paths-ignore:
 # all documentation-like files
   - '**doc/**'
-  - '**/*.md'
+  -  '**/*.md'
 
 # files in the root (which are typically are doc-like files)
   - '*'
 
 # Github automation
-  - '.github/**'
-  - '.git*'
+  - '**/*.github/**'
+  - '**/*.git*'
 
 # Clang tools configs
-  - '.clang-*'
+  - '**/*.clang-*'
 
 # cmake
   - 'cmake/ACL.cmake'
