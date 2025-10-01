@@ -18,7 +18,7 @@ header:
     spdx-id: Apache-2.0
     copyright-owner: Intel Corporation
     pattern: |
-      (.*Copyright \d{4}.* .+.*)
+      (.*Copyright \d{4}.* \w+.*)
 
       Licensed under the Apache License, Version 2\.0 \(the "License"\);
       you may not use this file except in compliance with the License\.
@@ -55,8 +55,7 @@ header:
   - 'cmake/FindACL.cmake'
   - 'cmake/FindBLAS.cmake'
   - 'cmake/FindOpenCL.cmake'
-  - 'cmake/FindComputeCpp.cmake'
-
+  
 # benchdnn inputs
   - 'tests/benchdnn/inputs/**'
 
