@@ -16,7 +16,7 @@
 header:
   license:
     spdx-id: Apache-2.0
-    copyright-owner: Intel Corporation
+    #copyright-owner: Intel Corporation
     pattern: |
       (.*Copyright \d{4}.* \w+.*)
 
