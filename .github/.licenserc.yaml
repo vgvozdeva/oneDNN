@@ -18,7 +18,7 @@ header:
     spdx-id: Apache-2.0
     copyright-owner: Intel Corporation
     pattern: |
-      (.*Copyright \d{4}(-\d{4})? Intel Corporation.*)
+      (.*Copyright \d{4}.* .+.*)
 
       Licensed under the Apache License, Version 2\.0 \(the "License"\);
       you may not use this file except in compliance with the License\.
@@ -57,26 +57,11 @@ header:
   - 'cmake/FindOpenCL.cmake'
   - 'cmake/FindComputeCpp.cmake'
 
-# Third party contributions
-  - 'src/cpu/aarch64/**'
-  - 'src/cpu/ppc64/**'
-  - 'src/cpu/rv64/**'
-  - 'src/cpu/s390x/**'
-  #- 'src/cpu/{aarch64,ppc64,rv64,s390x}/**' 
-
 # benchdnn inputs
   - 'tests/benchdnn/inputs/**'
 
 # Third party components
   - 'third_party/**'
-  - 'src/cpu/xbyak/**'
-  - 'src/cpu/x64/xbyak/**'
-  - 'src/common/ittnotify/**'
-  - 'src/common/spdlog/**'
-  - 'src/gpu/intel/jit/ngen/**'
-  - 'src/gpu/intel/sycl/l0/level_zero/**'
-  - 'src/gpu/intel/ocl/mdapi/**'
-  - 'tests/gtests/gtest/**'
 
 # visual-studio files
   - '**/*.vcxproj*'
