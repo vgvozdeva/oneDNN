@@ -13,13 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#(Copyright \d{4} Intel Corporation|Copyright \d{4}(?:[,\s-]+\d{4})*\s+.+)
-#===============================================================================
-#      (Copyright \d{4} Intel Corporation|Copyright \b\d{4}([,\s-]\d{4})*\b.*\S{2})
-#(Copyright \b\d{4}-\d{4}\b Intel Corporation|Copyright \b\d{4}([,\s-]\d{4})*\b.*\S{2})   
-#Copyright \b\d{4}-\d{4}\b Intel Corporation|Copyright \b\d{4}([,\s-]\d{4})*\b.*\S{2} - 330
-#   Copyright \d{4}-\d{4} Intel Corporation|Copyright \d{4}(?:[,\s-]\d{4})*\s+.+ - 11
-   # "(Copyright \\b\\d{4}-\\d{4}\\b Intel Corporation|Copyright \\b\\d{4}([,\\s-]\\d{4})*\\b.*\\S{2})
 header:
   license:
     spdx-id: Apache-2.0
