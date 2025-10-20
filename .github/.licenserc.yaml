@@ -12,13 +12,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+#(Copyright \d{4} Intel Corporation|Copyright \d{4}(?:[,\s-]+\d{4})*\s+.+)
 #===============================================================================
+#      (Copyright \d{4} Intel Corporation|Copyright \b\d{4}([,\s-]\d{4})*\b.*\S{2})
+#(Copyright \b\d{4}-\d{4}\b Intel Corporation|Copyright \b\d{4}([,\s-]\d{4})*\b.*\S{2})   
+#Copyright \b\d{4}-\d{4}\b Intel Corporation|Copyright \b\d{4}([,\s-]\d{4})*\b.*\S{2} - 330
+#   Copyright \d{4}-\d{4} Intel Corporation|Copyright \d{4}(?:[,\s-]\d{4})*\s+.+ - 11
+   # "(Copyright \\b\\d{4}-\\d{4}\\b Intel Corporation|Copyright \\b\\d{4}([,\\s-]\\d{4})*\\b.*\\S{2})
 header:
   license:
     spdx-id: Apache-2.0
     pattern: |
-      (?m)Copyright [0-9]{4}.*\w+.*
-      
+      (Copyright \d{4}(?:[,\s-]+\d{4})* (Arm Ltd\. and affiliates|Codeplay Software Limited|FUJITSU LIMITED|KNS Group LLC \(YADRO\)|Intel Corporation|IBM Corporation|YANDEX LLC|Alanna Tempest))
       Licensed under the Apache License, Version 2\.0 \(the "License"\);
       you may not use this file except in compliance with the License\.
       You may obtain a copy of the License at
@@ -30,7 +36,7 @@ header:
       WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied\.
       See the License for the specific language governing permissions and
       limitations under the License\.
-
+#(?m)Copyright [0-9]{4}.*\w+.*
   paths:
     - '**'
 
@@ -41,7 +47,7 @@ header:
 
 # files in the root (which are typically are doc-like files)
   - '*'
-
+#      Copyright [0-9]{4}[-0-9,\s]*[A-Za-z][A-Za-z\s]+
 # Github automation
   - '**/*.github/**'
   - '**/*.git*'
@@ -66,4 +72,4 @@ header:
   
   #comment: never
 
-  #license-location-threshold: 111  # specifies the index threshold where the license header can be located.
+  license-location-threshold: 111  # specifies the index threshold where the license header can be located.
