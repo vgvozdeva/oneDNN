@@ -155,8 +155,8 @@ private:
             const layout_t &dst, const expr_t &src_buf, const expr_t &dst_buf) {
         auto src_tile = src.sub(tile);
         auto &src_tile_blocks = src_tile.blocks();
-        int simd = into<int>(src_tile_blocks[0].block);
-        int vect_size = into<int>(src_tile_blocks[1].block);
+        int simd = into<int>(src_tile_blocks[0].size);
+        int vect_size = into<int>(src_tile_blocks[1].size);
         int tile_size = simd * vect_size * src.type().size();
         int slm_thr_size = (int)size_bytes(src);
         int dword_size = type_t::dword().size();
@@ -182,7 +182,7 @@ private:
 
         stmt_t store_stmt;
         stmt_t load_stmt;
-        src.for_each_tile(tile, [&](const icoord_t &start) {
+        for (auto &start : src.iter(tile)) {
             expr_t off = offset_bytes(src, start);
             auto store = store_send.call({slm_base_,
                     shuffle_t::make_broadcast(off0 + off, simd) + vec_off,
@@ -191,7 +191,7 @@ private:
                     {slm_base_, off0 + off, dst_buf + off, expr_t()});
             store_stmt = store_stmt.append(store);
             load_stmt = load_stmt.append(load);
-        });
+        }
 
         auto ret = store_stmt.append(load_stmt);
         return ret;
@@ -206,12 +206,12 @@ private:
         auto &d0 = dst_blocks[0];
         auto &d1 = dst_blocks[1];
 
-        if (s0.dim != d1.dim || s1.dim != d0.dim) return false;
-        gpu_assert(s0.block == d1.block);
-        gpu_assert(s1.block == d0.block);
+        if (s0.idx != d1.idx || s1.idx != d0.idx) return false;
+        gpu_assert(s0.size == d1.size);
+        gpu_assert(s1.size == d0.size);
 
-        int simd = into<int>(s0.block);
-        int vec_size = into<int>(s1.block);
+        int simd = into<int>(s0.size);
+        int vec_size = into<int>(s1.size);
         if (!utils::one_of(simd, 16)) return false;
         if (!utils::one_of(vec_size, 8)) return false;
 

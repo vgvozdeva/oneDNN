@@ -19,9 +19,11 @@
 #include "common/type_helpers.hpp"
 #include "gemmstone/driver_info.hpp"
 #include "gpu/intel/compute/utils.hpp"
+#include "gpu/intel/gemm/host_scalars.hpp"
 #include "gpu/intel/gemm/jit/walk_orders.hpp"
 #include "gpu/intel/jit/ir/block_2d_utils.hpp"
 #include "gpu/intel/jit/utils/utils.hpp"
+#include "gpu/intel/logging.hpp"
 
 #ifdef DNNL_WITH_SYCL
 #include "gpu/intel/sycl/stream.hpp"
@@ -182,6 +184,12 @@ status_t gen_t::launch_nocopy(const exec_ctx_t &ctx,
             }
             if (problem->hasBOffset()) {
                 arg_list.set(argn++, pd()->eff_zp_stride(i, DNNL_ARG_B));
+            }
+            if (problem->needsAGroupSums()) {
+                arg_list.set(argn++, pd()->eff_gs_stride(i, DNNL_ARG_A));
+            }
+            if (problem->needsBGroupSums()) {
+                arg_list.set(argn++, pd()->eff_gs_stride(i, DNNL_ARG_B));
             }
         }
         for (int i = 0; i < po_count; i++) {
@@ -421,6 +429,32 @@ status_t gen_t::execute(const exec_ctx_t &ctx) const {
     if (pd()->with_a_zero_points() || pd()->with_b_zero_points()) {
         ao = &GEMM_CTX_ARG_STORAGE(a_zero_point);
         bo = &GEMM_CTX_ARG_STORAGE(b_zero_point);
+    }
+
+    // Convert host scalar scales to Alpha
+    if (pd()->attr()->scales_.has_host_scalars()) {
+        const auto &a_scales = pd()->attr()->scales_.get(DNNL_ARG_A);
+        const auto &b_scales = pd()->attr()->scales_.get(DNNL_ARG_B);
+        const auto &c_scales = pd()->attr()->scales_.get(DNNL_ARG_C);
+        const auto &a_scales_storage = GEMM_CTX_ARG_STORAGE(a_scales);
+        const auto &b_scales_storage = GEMM_CTX_ARG_STORAGE(b_scales);
+        const auto &c_scales_storage = GEMM_CTX_ARG_STORAGE(c_scales);
+        alpha = 1.0f;
+        float scale_val = 0;
+        if (a_scales.is_host_scalar()) {
+            CHECK(maybe_get_scale_as_float(a_scales_storage, scale_val));
+            alpha *= scale_val;
+        }
+        if (b_scales.is_host_scalar()) {
+            CHECK(maybe_get_scale_as_float(b_scales_storage, scale_val));
+            alpha *= scale_val;
+        }
+        // Limited support of host scalar dst scales
+        if (c_scales.is_host_scalar() && pd()->attr()->post_ops_.len() == 0) {
+            CHECK(maybe_get_scale_as_float(c_scales_storage, scale_val));
+            gpu_assert(scale_val != 0);
+            alpha /= scale_val;
+        }
     }
 
     if (pd()->a_scales_2d()) { a_scales = &GEMM_CTX_ARG_STORAGE(a_scales); }

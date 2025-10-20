@@ -19,10 +19,6 @@
 
 #include "gpu/intel/jit/dsl/decl.hpp"
 #include "gpu/intel/jit/dsl/tensor.hpp"
-#include "gpu/intel/jit/ir/ir.hpp"
-#include "gpu/intel/jit/ir/kernel_info.hpp"
-#include "gpu/intel/jit/ir/message.hpp"
-#include "gpu/intel/jit/ir/message_patterns.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -35,111 +31,11 @@ int grf_size();
 int min_align_2d();
 int min_pitch_2d();
 
-using layout_t = dnnl::impl::gpu::intel::jit::layout_t;
-
 struct send_hint_t {
     send_cache_hint_t cache;
 };
 
-struct tensor_t {
-    tensor_t() = default;
-    tensor_t(const expr_t &buf, const layout_t &layout)
-        : buf(buf), layout(layout) {
-        gpu_assert(buf.type().is_ptr()) << "Buffer must be of a pointer type.";
-    }
-    const type_t &type() const { return layout.type(); }
-    tensor_t sub(const tile_t &tile, const icoord_t &coord) const {
-        // coord is not measured relative to tile size
-        for (auto &var : coord)
-            gpu_assert(coord[var] % tile[var] == 0);
-        return {subbuf(coord), layout.sub(tile)};
-    }
-    expr_t subbuf(const icoord_t &coord) const {
-        return buf[layout.offset<int>(coord)];
-    }
-
-    std::string str() const {
-        std::ostringstream oss;
-        oss << "buffer:    " << buf.str() << "\n";
-        oss << "layout: " << layout.str();
-        return oss.str();
-    }
-
-    IR_DEFINE_DUMP()
-
-    expr_t buf;
-    layout_t layout;
-};
-
-struct global_tensor_t {
-    expr_t buf;
-    type_t type;
-    expr_t base_offset;
-    coord_t coord;
-    idx_map_t<expr_t> sizes;
-    idx_map_t<expr_t> strides;
-    tile_t tile;
-
-    global_tensor_t() = default;
-    global_tensor_t(const expr_t &buf, const idx_map_t<expr_t> &sizes,
-            const idx_map_t<expr_t> &strides)
-        : buf(buf), type(buf.type().base()), sizes(sizes), strides(strides) {
-        gpu_assert(buf.type().is_ptr()) << "Buffer must be of a pointer type.";
-    }
-    global_tensor_t(const expr_t &buf, const type_t &type,
-            const expr_t &base_offset, const coord_t &coord,
-            const idx_map_t<expr_t> &sizes, const idx_map_t<expr_t> &strides,
-            const tile_t &tile)
-        : buf(buf)
-        , type(type)
-        , base_offset(base_offset)
-        , coord(coord)
-        , sizes(sizes)
-        , strides(strides)
-        , tile(tile) {
-        gpu_assert(buf.type().is_ptr()) << "Buffer must be of a pointer type.";
-    }
-
-    expr_t offset(const icoord_t &sub_coord) const {
-        expr_t ret = base_offset;
-        for (auto &c : sub_coord) {
-            ret += (coord[c] + sub_coord[c]) * strides[c];
-        }
-        return simplify(ret * type.size());
-    }
-
-    global_tensor_t sub(const tile_t &tile, const coord_t &coord) const {
-        global_tensor_t ret = *this;
-        ret.coord = coord;
-        ret.tile = tile;
-        return ret;
-    }
-
-    std::string str() const {
-        std::ostringstream oss;
-        oss << "(" << buf << "+" << base_offset << ")." << type << " : ";
-        for (auto &k : coord) {
-            oss << " " << k << " - (coord: " << coord[k]
-                << ", stride: " << strides[k] << ", size: " << sizes[k];
-            if (!tile.is_empty()) oss << ", tile: " << tile[k];
-            oss << ")";
-        }
-        return oss.str();
-    }
-};
-
-struct kernel_t {
-    kernel_t() : iface("invalid_dsl_kernel") {}
-    kernel_t(kernel_iface_t iface, stmt_t body, const exec_config_t &exec_cfg)
-        : iface(std::move(iface)), body(std::move(body)), exec_cfg(exec_cfg) {}
-
-    kernel_iface_t iface;
-    stmt_t body;
-    exec_config_t exec_cfg;
-    ngen::DebugConfig debug_cfg;
-};
-
-void declare_kernel(const kernel_iface_t &interface, ir_context_t &ctx,
+void declare_kernel(const kernel::iface_t &interface, ir_context_t &ctx,
         bool new_ir_api = false);
 kernel_t end_kernel();
 
@@ -160,14 +56,11 @@ const expr_t &local_size(int idx);
 class lval_t {
 public:
     lval_t() = default;
-    lval_t(const type_t &type, const std::string &name)
-        : var(var_t::make(type, name)) {}
+    lval_t(const type_t &type, const std::string &name);
     lval_t(const expr_t &v) : var(v) {}
     lval_t &operator=(const expr_t &obj);
 
-    lval_t sub(int off, int elems) const {
-        return lval_t(ref_t::make(var, off, elems));
-    }
+    lval_t sub(int off, int elems) const;
     expr_t ptr(int off = 0) const { return var.ptr(off); }
     lval_t operator[](int off) const { return sub(off, 1); }
     operator expr_t() const { return var; }
@@ -195,7 +88,8 @@ public:
         return oss.str();
     }
 
-    IR_DEFINE_DUMP()
+    void dump() const { printf("%s\n", str().c_str()); }
+
     expr_t var;
 };
 
@@ -228,8 +122,9 @@ void store(const global_tensor_t &g, const tensor_t &t,
 void mma(const tensor_t &C, const tensor_t &A, const tensor_t &B,
         const tile_t &tile, const icoord_t &base, bool is_systolic);
 
+void _if_impl(const expr_t &cond, const stmt_t &body);
 template <typename F>
-void _if(const expr_t &cond, F if_body) {
+void _if(const expr_t &cond, const F &if_body) {
     if (is_const(cond)) {
         if (to_bool(cond)) {
             begin_scope();
@@ -239,10 +134,12 @@ void _if(const expr_t &cond, F if_body) {
     } else {
         begin_scope();
         if_body();
-        append(if_t::make(cond, pop_scope()));
+        _if_impl(cond, pop_scope());
     }
 }
 
+void _if_impl(
+        const expr_t &cond, const stmt_t &if_body, const stmt_t &else_body);
 template <typename F, typename G>
 void _if(const expr_t &cond, const F &if_body, const G &else_body) {
     if (is_const(cond)) {
@@ -260,16 +157,18 @@ void _if(const expr_t &cond, const F &if_body, const G &else_body) {
 
         begin_scope();
         else_body();
-        append(if_t::make(cond, if_body_stmt, pop_scope()));
+        _if_impl(cond, if_body_stmt, pop_scope());
     }
 }
 
+void _for_impl(const expr_t &var, const expr_t &bound, const expr_t &step,
+        const stmt_t &body);
 template <typename F>
 void _for(const expr_t &var, const expr_t &bound, const expr_t &step,
         const F &body) {
     begin_scope();
     body();
-    append(for_t::make(var, 0, bound, pop_scope(), step));
+    _for_impl(var, bound, step, pop_scope());
 }
 
 template <typename F>
@@ -277,12 +176,13 @@ void _for(const expr_t &var, const expr_t &bound, const F &body) {
     _for(var, bound, 1, body);
 }
 
+void _while_impl(const expr_t &cond, const stmt_t &body);
 template <typename F>
-void _while(const expr_t &cond, F body) {
+void _while(const expr_t &cond, const F &body) {
     if (is_const(cond) && !to_bool(cond)) return;
     begin_scope();
     body();
-    append(while_t::make(cond, pop_scope()));
+    _while_impl(cond, pop_scope());
 }
 
 void binary(op_kind_t op, const tensor_t &dst, const tensor_t &src0,

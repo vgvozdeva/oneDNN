@@ -51,20 +51,17 @@ struct brgemm_kernel_diff_bias_t {
 
 #define GET_OFF(field) (uint32_t) offsetof(brgemm_kernel_diff_bias_t, field)
 
-struct jit_brgemm_kernel_diff_bias_t : public jit_generator {
+struct jit_brgemm_kernel_diff_bias_t : public jit_generator_t {
     jit_brgemm_kernel_diff_bias_t(
             const jit_brgemm_primitive_conf_t &ajbgp, const brgemm_t &abrg)
         : brg_(abrg)
         , ddst_dt_(ajbgp.dst_dt)
         , bia_dt_(ajbgp.bia_dt)
         , acc_dt_(ajbgp.acc_dt)
+        , ddst_typesize_(types::data_type_size(ddst_dt_))
         , bia_typesize_(types::data_type_size(bia_dt_))
-        , acc_typesize_(types::data_type_size(acc_dt_)) {
-
-        ddst_dt_ = ajbgp.dst_dt;
-        ddst_typesize_ = types::data_type_size(ddst_dt_);
-        mult_ = data_type_vnni_granularity(ddst_dt_);
-    }
+        , acc_typesize_(types::data_type_size(acc_dt_))
+        , mult_(data_type_vnni_granularity(ddst_dt_)) {}
 
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_brgemm_kernel_diff_bias_t)
 
@@ -279,9 +276,9 @@ struct brgemm_kernel_post_ops_t {
 };
 
 template <cpu_isa_t isa>
-struct jit_brgemm_kernel_post_ops : public jit_generator {
+struct jit_brgemm_kernel_post_ops_t : public jit_generator_t {
 
-    jit_brgemm_kernel_post_ops(const jit_brgemm_conv_conf_t &ajcp,
+    jit_brgemm_kernel_post_ops_t(const jit_brgemm_conv_conf_t &ajcp,
             const brgemm_t &abrg, const primitive_attr_t &aattr)
         : brg(abrg)
         , jcp(ajcp)
@@ -334,7 +331,7 @@ struct jit_brgemm_kernel_post_ops : public jit_generator {
         bia_typesize_ = (jcp.with_bias) ? types::data_type_size(bia_dt_) : 0;
     }
 
-    ~jit_brgemm_kernel_post_ops() override = default;
+    ~jit_brgemm_kernel_post_ops_t() override = default;
 
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_brgemm_kernel_post_ops)
 
@@ -435,7 +432,8 @@ private:
     }
 
     void cvt2ps(data_type_t type_in, const ZReg zmm_in, const AdrNoOfs &op,
-            bool mask_flag, bool store, PReg ktail_mask) {
+            bool mask_flag, bool store, PReg ktail_mask,
+            bool skip_cvt2ps = false) {
         switch (type_in) {
             case data_type::f32:
             case data_type::s32:
@@ -449,7 +447,18 @@ private:
                     ld1w(zmm_in.s, k_full_mask / T_z, op);
                 }
                 break;
-            case data_type::s8: assert(!"unsupported data type\n"); break;
+            case data_type::s8:
+                if (mask_flag) {
+                    if (store) {
+                        st1w(zmm_in.s, ktail_mask / T_m, op);
+
+                    } else {
+                        ld1sb(zmm_in.s, ktail_mask / T_z, op);
+                    }
+                } else {
+                    ld1sb(zmm_in.s, k_full_mask / T_z, op);
+                }
+                break;
             case data_type::u8:
                 if (mask_flag) {
                     if (store) {
@@ -462,10 +471,22 @@ private:
                     ld1b(zmm_in.s, k_full_mask / T_z, op);
                 }
                 break;
-            case data_type::bf16: assert(!"unsupported data type\n"); break;
+            case data_type::bf16:
+                if (mask_flag) {
+                    if (store) {
+                        st1w(zmm_in.s, ktail_mask / T_m, op);
+                    } else {
+                        ld1h(zmm_in.s, ktail_mask / T_z, op);
+                        lsl(zmm_in.s, zmm_in.s, 16);
+                    }
+                } else {
+                    ld1h(zmm_in.s, k_full_mask / T_z, op);
+                    lsl(zmm_in.s, zmm_in.s, 16);
+                }
+                break;
             default: assert(!"unsupported data type");
         }
-        if (types::is_integral_dt(type_in)) {
+        if (!skip_cvt2ps && types::is_integral_dt(type_in)) {
             scvtf(zmm_in.s, P_ALL_ONE / T_m, zmm_in.s);
         }
     }
@@ -611,8 +632,8 @@ private:
                 add_imm(X_DEFAULT_ADDR, aux_reg_in,
                         inp_typesize_ * (m * brg.LDC + n * brg.ld_block),
                         X_TMP_0);
-                cvt2ps(inp_dt_, vector(m, n), ptr(X_DEFAULT_ADDR), true, false,
-                        k_mask);
+                cvt2ps(inp_dt_, vector(m, n), ptr(X_DEFAULT_ADDR), tail, false,
+                        k_mask, req_comp);
             }
         }
 
@@ -637,7 +658,7 @@ private:
                 auto vmm_bias = vmm_tmp(0);
                 add_imm(X_DEFAULT_ADDR, aux_reg_bias,
                         bia_typesize_ * (n * brg.ld_block), X_TMP_0);
-                cvt2ps(bia_dt_, vmm_bias, ptr(X_DEFAULT_ADDR), true, false,
+                cvt2ps(bia_dt_, vmm_bias, ptr(X_DEFAULT_ADDR), tail, false,
                         k_mask);
                 for (int m = 0; m < m_block; m++) {
                     fadd(vector(m, n).s, vector(m, n).s, vmm_bias.s);
@@ -714,7 +735,23 @@ private:
                             X_TMP_0); //addr
                     st1w(vmm.s, k_mask / T_m, ptr(X_DEFAULT_ADDR));
                     break;
-                case data_type::s8: assert(!"unsupported data type\n"); break;
+                case data_type::bf16:
+                    add_imm(X_DEFAULT_ADDR, aux_reg_out,
+                            out_typesize_ * (m * LDD_ + n * brg.ld_block),
+                            X_TMP_0); //addr
+                    // bfcvt() converts f32 to bf16 (by zero extension) and places bf16s into even lanes
+                    // st1h(vmm.s, ....) narrows bf16's in even lanes into memory.
+                    bfcvt(vmm.h, k_mask / T_m, vmm.s);
+                    st1h(vmm.s, k_mask / T_m, ptr(X_DEFAULT_ADDR));
+                    break;
+                case data_type::s8:
+                    smin(vmm.s, std::numeric_limits<int8_t>::max());
+                    smax(vmm.s, std::numeric_limits<int8_t>::min());
+                    add_imm(X_DEFAULT_ADDR, aux_reg_out,
+                            out_typesize_ * (m * LDD_ + n * brg.ld_block),
+                            X_TMP_0); //addr
+                    st1b(vmm.s, k_mask / T_m, ptr(X_DEFAULT_ADDR));
+                    break;
                 case data_type::u8:
                     umin(vmm.s, std::numeric_limits<uint8_t>::max());
                     add_imm(X_DEFAULT_ADDR, aux_reg_out,

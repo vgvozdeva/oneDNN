@@ -598,7 +598,7 @@ inline bool bboxContains(const DependencyRegion &dep1, const DependencyRegion &d
 // Check if an ARF type needs SWSB tracking.
 inline bool trackableARF(ARFType type)
 {
-    return (type == ARFType::acc || type == ARFType::a || type == ARFType::s);
+    return (type == ARFType::acc || type == ARFType::a || type == ARFType::s || type == ARFType::f);
 }
 
 // Distance in an in-order pipe after which a dependency can be ignored.
@@ -1794,7 +1794,7 @@ PVCWARWA analyzePVCWARWA(HW hw, Program &program, BasicBlock &bb, int phase,
     }
 
     // Case 2: walk forward, looking for a new target send instruction.
-    auto eligibleSend = [=, &program](uint32_t inum) {
+    auto eligibleSend = [=, &program, &dep](uint32_t inum) {
         auto &insn = program[inum];
         if (inum != dep.inum && insn.predicated())
             return false;
@@ -1871,6 +1871,7 @@ inline void analyze(HW hw, int tokens, Program &program, BasicBlock &bb, int pha
     std::array<int32_t, NPipes> counters;
     std::vector<Producer> depList, depListIncoming, chainProducers, pvcWARWADeps;
     std::vector<std::pair<bool, const DependencyRegion*>> depOperands;
+    DependencyRegion cmodDepRegion(hw);
 
     auto allTokens = uint32_t((uint64_t(1) << tokens) - 1);
 
@@ -2078,6 +2079,10 @@ inline void analyze(HW hw, int tokens, Program &program, BasicBlock &bb, int pha
                 depOperands.push_back(std::make_pair(rw, &regions[srcN + 1]));
             }
 
+            // Handle HW bug with cross-pipe flag register dependencies.
+            if (hw >= HW::XeHPC && insn.getCModDepRegion(cmodDepRegion))
+                depOperands.push_back(std::make_pair(true, &cmodDepRegion));
+
             // Handle PVC HW bug with WAR dependencies on send instructions.
             auto pww = analyzePVCWARWA(hw, program, bb, phase, consumeOp, pvcWARWADeps);
 
@@ -2217,8 +2222,12 @@ inline void analyze(HW hw, int tokens, Program &program, BasicBlock &bb, int pha
                 tokenMaskSrc &= ~tokenMaskDst;
 
                 // Clean producer list of known SWSB and sync dependencies.
+                // Be careful with coalesced A@ dependencies in phase 1: if they may be
+                //   reduced to a single pipe dependency later they cannot be cleared now.
                 if (tokenMaskSrc) bb.producers.removeByTokenMask(tokenMaskSrc, false);
                 if (tokenMaskDst) bb.producers.removeByTokenMask(tokenMaskDst, true);
+                if ((depPipe == PipeMaskA) && !recordSWSB)
+                    generated.dists.fill(0);
                 bb.producers.removeIntersections(generated);
 
                 if (recordSWSB) {

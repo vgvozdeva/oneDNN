@@ -1,5 +1,6 @@
 #===============================================================================
 # Copyright 2016-2025 Intel Corporation
+# Copyright 2025 Arm Ltd. and affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -53,10 +54,7 @@ endif()
 # the macros to avoid code duplication and ensure consistency.
 macro(platform_unix_and_mingw_common_ccxx_flags var)
     append(${var} "-Wall -Wno-unknown-pragmas")
-    # TODO: remove Aarch64 limitation when ACL hits are resolved.
-    if(NOT DNNL_TARGET_ARCH STREQUAL "AARCH64")
-        append(${var} "-Wundef")
-    endif()
+    append(${var} "-Wundef")
     append_if(DNNL_WERROR ${var} "-Werror")
     append(${var} "-fvisibility=internal")
 endmacro()
@@ -150,15 +148,14 @@ if (DNNL_TARGET_ARCH STREQUAL "RV64")
         set(CMAKE_REQUIRED_FLAGS_SAVE ${CMAKE_REQUIRED_FLAGS})
         set(CMAKE_REQUIRED_FLAGS "${ARCH_SIMD_TEST_FLAGS}")
         check_cxx_source_compiles("#include <riscv_vector.h>
-                                    #ifndef __riscv_zvfh
-                                    #error \"Zvfh extension is not supported by the compiler\"
-                                    #endif
-
-                                    int main() {
-                                     vfloat16m1_t a;
-                                     return 0; 
-                                    };"
-                                    CAN_COMPILE_ZVFH_INTRINSICS
+                                   #ifndef __riscv_zvfh
+                                   #error \"Zvfh extension is not supported by the compiler\"
+                                   #endif   
+                                   int main() {
+                                    vfloat16m1_t a;
+                                    return 0; 
+                                   };"
+                                   CAN_COMPILE_ZVFH_INTRINSICS
         )
         set(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
 
@@ -290,6 +287,15 @@ if(MSVC)
         append(CMAKE_CCXX_FLAGS "-Wno-unknown-warning-option")
     endif()
 elseif(UNIX OR MINGW)
+
+    # Enable debug checks for common C++ standard libraries
+    if(DNNL_DEV_MODE OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+        # Enable debug checks for libstdc++
+        append(CMAKE_CCXX_FLAGS "-D_GLIBCXX_ASSERTIONS")
+        # Enable debug checks for libc++
+        append(CMAKE_CCXX_FLAGS "-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE")
+    endif()
+
     if(DNNL_WITH_SYCL OR CMAKE_BASE_NAME STREQUAL "icx" OR CMAKE_BASE_NAME STREQUAL "icpx")
         # When using Debug build mode CMake adds "-g" option without "-O0"
         # causing the warning. This probably happens because clang/gcc compilers

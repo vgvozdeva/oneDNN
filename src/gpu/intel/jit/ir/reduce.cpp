@@ -34,7 +34,7 @@ stmt_t create_reduce_stmt(const layout_t &src, const layout_t &dst,
     auto sub_coord = _sub_tile_coord.coord;
     if (sub_tile.is_empty()) sub_tile = src.tile();
     if (sub_coord.is_empty()) sub_coord = coord_t(src.ndims());
-    dim_idx_t ndims = src.ndims();
+    auto ndims = src.ndims();
 
     // Align dst layout with src layout according to the mask if needed.
     layout_t dst_aligned;
@@ -52,7 +52,7 @@ stmt_t create_reduce_stmt(const layout_t &src, const layout_t &dst,
 
         auto dst_blocks = dst.blocks();
         for (auto &b : dst_blocks)
-            b.dim = dst2src[b.dim];
+            b.idx = dst2src[b.idx];
 
         // Create final layout.
         dst_aligned = layout_t(dst.type(), dst_blocks, dst.offset(), ndims);
@@ -60,7 +60,7 @@ stmt_t create_reduce_stmt(const layout_t &src, const layout_t &dst,
         dst_aligned = dst;
     }
 
-    for (dim_idx_t i = 0; i < ndims; i++) {
+    for (size_t i = 0; i < ndims; i++) {
         if ((reduction_mask & (1 << i)) == 0) {
             sub_tile[i] = 1;
             sub_coord[i] = expr_t(0);

@@ -62,7 +62,7 @@ subgraph_t::subgraph_t(const std::vector<op_ptr> &ops, const dnnl::engine &eng,
 }
 
 subgraph_t::subgraph_t(const std::vector<op_ptr> &ops, bool reset_layout)
-    : graph_t(ops), p_engine_(nullptr) {
+    : graph_t(ops), p_engine_(nullptr), can_use_blocked_layout_(false) {
     if (reset_layout) { set_all_layout_to_any(get_mutable_ops()); }
 }
 
@@ -154,6 +154,7 @@ std::string property2str(property_type_t ptype) {
         case property_type::undef: str = "undef"; break;
         case property_type::variable: str = "variable"; break;
         case property_type::constant: str = "constant"; break;
+        case property_type::host_scalar: str = "host_scalar"; break;
         default: break;
     }
     return str;

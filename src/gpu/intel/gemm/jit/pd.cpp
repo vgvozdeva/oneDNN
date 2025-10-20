@@ -35,8 +35,9 @@ namespace {
 int quant_entry_ndims(
         const quant_entry_t &entry, const memory_desc_t &qmd, int k_idx) {
     if (entry.has_default_values()) return -1;
+    if (qmd.ndims < 2) return 0;
 
-    // C unt the number of nontrivial (dim > 1) dimensions present
+    // Count the number of nontrivial (dim > 1) dimensions present
     int count = 0;
     for (int i = qmd.ndims - 2; i < qmd.ndims; ++i) {
         if (qmd.dims[i] > 1) { count++; }
@@ -64,6 +65,7 @@ status_t pd_t::init_post_ops() {
 
     bool ok = true;
     int prelu_count = 0;
+    const int num_orig_postops = post_ops_.len();
     for (int i = 0; i < post_ops_.len(); i++) {
         const auto &e = post_ops_.entry_[i];
         switch (e.kind) {
@@ -145,21 +147,24 @@ status_t pd_t::init_post_ops() {
         return status::success;
     };
 
-    if (!a_scales.has_default_values()) {
+    if (!a_scales.has_default_values() && !a_scales.is_host_scalar()) {
+        // Host scalar scale will be converted to Alpha
         bool converted;
         CHECK(maybe_convert_scales_to_postop(
                 a_scale_md_, DNNL_ARG_A, a_scales.get_data_type(), converted));
         if (converted) asc_dims_ = -1;
     }
 
-    if (!b_scales.has_default_values()) {
+    if (!b_scales.has_default_values() && !b_scales.is_host_scalar()) {
         bool converted;
         CHECK(maybe_convert_scales_to_postop(
                 b_scale_md_, DNNL_ARG_B, b_scales.get_data_type(), converted));
         if (converted) bsc_dims_ = -1;
     }
 
-    if (!c_scales.has_default_values()) {
+    bool try_c_scale = !c_scales.is_host_scalar()
+            || (c_scales.is_host_scalar() && num_orig_postops > 0);
+    if (!c_scales.has_default_values() && try_c_scale) {
         bool converted;
         CHECK(maybe_convert_scales_to_postop(
                 c_scale_md_, DNNL_ARG_C, c_scales.get_data_type(), converted));
@@ -365,10 +370,9 @@ bool pd_t::scales_ok() {
     int ndims = desc()->a_desc.ndims;
     using namespace data_type;
 
-    if (scales.has_host_scalars()) return false;
-
     for (auto s : {DNNL_ARG_A, DNNL_ARG_B, DNNL_ARG_C}) {
-        if (scales.has_default_values(s)) continue;
+        if (scales.has_default_values(s) || scales.get(s).is_host_scalar())
+            continue;
         const auto &x_scales = scales.get(s);
 
         auto mask = x_scales.get_mask();
@@ -457,6 +461,15 @@ dim_t pd_t::eff_zp_stride(int idx, int arg) const {
             << "Expected plain zp_md_";
     if (zp_md.dims[idx] == 1) return 0;
     return zp_md.format_desc.blocking.strides[idx];
+}
+
+dim_t pd_t::eff_gs_stride(int idx, int arg) const {
+    gpu_assert(utils::one_of(arg, DNNL_ARG_A, DNNL_ARG_B));
+    auto gs_md = ((DNNL_ARG_A == arg) ^ swap_ab()) ? a_gs_md_ : b_gs_md_;
+    gpu_assert(memory_desc_wrapper(gs_md).is_plain())
+            << "Expected plain gs_md_";
+    if (gs_md.dims[idx] == 1) return 0;
+    return gs_md.format_desc.blocking.strides[idx];
 }
 
 } // namespace jit

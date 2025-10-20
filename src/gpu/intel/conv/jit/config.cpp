@@ -195,7 +195,7 @@ status_t problem_t::init(
     isp = id * ih * iw;
     osp = od * oh * ow;
 
-    hw_t hw(engine);
+    hw_t hw(make_ir_hw(engine));
     init_transpose(hw);
     CHECK(init_abc_data_types(hw));
     CHECK(init_acc_data_type());
@@ -819,17 +819,17 @@ status_t init_tensor_layouts(
     // Disable cases that cannot generate valid fp4 tiling.
     if (src_layout.type().is_fp4())
         for (auto &b : src_layout.blocks()) {
-            if (b.stride == stride_t(1) && b.block % 8)
+            if (b.stride == stride_t(1) && b.size % 8)
                 return status::unimplemented;
         }
     if (wei_layout.type().is_fp4())
         for (auto &b : wei_layout.blocks()) {
-            if (b.stride == stride_t(1) && b.block % 8)
+            if (b.stride == stride_t(1) && b.size % 8)
                 return status::unimplemented;
         }
     if (dst_layout.type().is_fp4())
         for (auto &b : dst_layout.blocks()) {
-            if (b.stride == stride_t(1) && b.block % 8)
+            if (b.stride == stride_t(1) && b.size % 8)
                 return status::unimplemented;
         }
 
@@ -1020,7 +1020,7 @@ bool post_ops_ok(const problem_t &prb, const hw_t &hw) {
                 return false;
             else if (po.eltwise.alg == alg_kind::eltwise_tanh
                     && hw == ngen::HW::XeHPG
-                    && utils::one_of(hw.product_family(),
+                    && utils::one_of(hw.family(),
                             ngen::ProductFamily::GenericXeHPG,
                             ngen::ProductFamily::DG2)
                     && hw.systolic_support() && hw.eu_count() <= 128)
@@ -1060,7 +1060,7 @@ status_t init_fma_kind(
 }
 
 status_t init_simd(config_t &cfg) {
-    if (cfg.exec_cfg_param().is_overridden("simd")) return status::success;
+    if (cfg.options_param().is_overridden("simd")) return status::success;
 
     const auto &prb = cfg.prb();
     int simd = get_simd_size(cfg.hw(), cfg.fma_kind(), to_ir(prb.a_data_type),
@@ -1070,7 +1070,7 @@ status_t init_simd(config_t &cfg) {
 }
 
 status_t init_vec_size(config_t &cfg) {
-    if (cfg.exec_cfg_param().is_overridden("vec")) return status::success;
+    if (cfg.options_param().is_overridden("vec")) return status::success;
 
     const auto &prb = cfg.prb();
     int vec_size = cfg.simd();
@@ -1101,7 +1101,7 @@ int default_regs(const config_t &cfg) {
 }
 
 void init_regs(config_t &cfg) {
-    if (cfg.exec_cfg_param().is_overridden("regs")) return;
+    if (cfg.options_param().is_overridden("regs")) return;
     cfg.set_regs(default_regs(cfg));
 }
 
@@ -1137,7 +1137,7 @@ void init_bwd_d_optimize(config_t &cfg) {
 
 status_t init_pd_time_cfg(const problem_t &prb, config_t &cfg,
         impl::engine_t *engine, convolution_pd_t *pd, primitive_attr_t *attr) {
-    hw_t hw(engine);
+    hw_t hw(make_ir_hw(engine));
 
     VDISPATCH_CHECK(pd, engine, hw_ok(hw), VERBOSE_UNSUPPORTED_ISA);
     VDISPATCH_CHECK(
@@ -1150,7 +1150,7 @@ status_t init_pd_time_cfg(const problem_t &prb, config_t &cfg,
     zero_points_config_t zp_cfg(pd);
     cfg.set_zp_cfg(zp_cfg);
     cfg.set_prb(prb);
-    cfg.set_exec_cfg(exec_config_t(hw));
+    cfg.set_options(kernel::options_t(hw));
     cfg.maybe_override_from_env();
 
     CHECK(init_fma_kind(cfg, pd, engine));
@@ -1167,12 +1167,12 @@ status_t init_pd_time_cfg(const problem_t &prb, config_t &cfg,
 }
 
 bool pipeline_unroll_hint(const problem_t &prb, fma_kind_t fma_kind,
-        const exec_config_t &exec_cfg,
+        const kernel::options_t &options,
         bwd_d_optimize_kind_t bwd_d_optimize_kind,
         bool allow_global_reduction) {
     bool do_unroll = true;
     if (prb.is_fwd) {
-        const int max_unroll = exec_cfg.hw() <= ngen::HW::XeLP ? 4 : 9;
+        const int max_unroll = options.hw() <= ngen::HW::XeLP ? 4 : 9;
         if (prb.ksp > max_unroll) do_unroll = false;
     } else if (prb.is_bwd_d) {
         // Do not perform full unrolling when there are too many inner
@@ -1196,7 +1196,7 @@ bool pipeline_unroll_hint(const problem_t &prb, fma_kind_t fma_kind,
     }
     // Unrolling with mad or dp4a results in too large kernels.
     if (utils::one_of(fma_kind, fma_kind_t::mad, fma_kind_t::dp4a)
-            && (exec_cfg.hw() >= ngen::HW::XeHPG || prb.mb != 1))
+            && (options.hw() >= ngen::HW::XeHPG || prb.mb != 1))
         do_unroll = false;
     return do_unroll;
 }
@@ -1205,7 +1205,7 @@ void init_pipeline(config_t &cfg) {
     if (cfg.pipeline().is_overridden()) return;
 
     bool do_unroll
-            = pipeline_unroll_hint(cfg.prb(), cfg.fma_kind(), cfg.exec_cfg(),
+            = pipeline_unroll_hint(cfg.prb(), cfg.fma_kind(), cfg.options(),
                     cfg.bwd_d_optimize_kind(), cfg.allow_global_reduction());
     if (cfg.plan().reuse_headers) do_unroll = false;
     cfg.pipeline().set(do_unroll, cfg.plan().reuse_headers);
@@ -1214,8 +1214,7 @@ void init_pipeline(config_t &cfg) {
 send_pattern_t<pvar_t> validate_blocking(const config_t &cfg,
         stride_layout_t::input_tensor_t tensor, bool check_2d) {
     using send_pattern = send_pattern_t<pvar_t>;
-    const compute::gpu_arch_t arch
-            = convert_ngen_arch_to_dnnl(cfg.hw().to_ngen());
+    const compute::gpu_arch_t arch = convert_ngen_arch_to_dnnl(cfg.hw());
 
     auto is_match = [&](const send_hint_t<pvar_t> &hint) {
         for (auto &dim : cfg.index_dims()) {
@@ -1467,13 +1466,13 @@ walk_order_t maybe_fixup_group_with_small_channels(
     auto &b0 = layout[0];
     auto &b1 = layout[1];
     // Check that layout has groups followed by channels, i.e. *gc form.
-    if (b0.dim.index() != c_dim_idx || b1.dim.index() != g_dim_idx)
+    if (b0.idx.index() != c_dim_idx || b1.idx.index() != g_dim_idx)
         return walk_order;
     // If the full channel dimension exceeds the cache line size, cache reuse
     // should be already good enough.
     // Xe2 has 256 byte L3 cache block so try to span 4 cache lines.
     int factor = (cfg.hw() == ngen::HW::Xe2) ? 4 : 1;
-    if (layout.type().size() * b0.block >= cfg.hw().cache_line_size() * factor)
+    if (layout.type().size() * b0.size >= cfg.hw().cache_line_size() * factor)
         return walk_order;
 
     walk_order_t fixed;
@@ -1612,7 +1611,7 @@ walk_order_t compute_walk_order(const config_t &cfg) {
     // math.inv usage to emulate integer division when using blocked walk
     // order.
     if (cfg.hw() == ngen::HW::XeHPG
-            && utils::one_of(cfg.hw().product_family(),
+            && utils::one_of(cfg.hw().family(),
                     ngen::ProductFamily::GenericXeHPG,
                     ngen::ProductFamily::DG2))
         return default_walk_order;
@@ -1630,7 +1629,7 @@ walk_order_t compute_walk_order(const config_t &cfg) {
     // If the kernel does not require multiple waves then no L3 blocking is not
     // applied.
     int max_tgs_per_wave
-            = config_t::get_max_threadgroups_per_wave(cfg.exec_cfg(), tg_size);
+            = config_t::get_max_threadgroups_per_wave(cfg.options(), tg_size);
     if (grid_tile.elems() <= max_tgs_per_wave) return default_walk_order;
 
     // Add M/N blocks until the full footprint fits L3 cache.
@@ -1932,7 +1931,7 @@ std::string config_t::str() const {
 
     ostringstream_t oss;
     // clang-format off
-    oss << "  Exec config:                " << exec_cfg().str() << std::endl;
+    oss << "  Exec config:                " << options().str() << std::endl;
     oss << "  Problem:                    " << prb().desc_str() << std::endl;
     const char *names[] = {"Source", "Weights", "Destination"};
     const layout_param_t *layouts[] = {&src_layout(), &wei_layout(), &dst_layout()};
@@ -1953,8 +1952,8 @@ std::string config_t::str() const {
     oss << "  Kernel grid:                " << kernel_grid() << std::endl;
     oss << "  Thread group:               " << thread_group_grid() << std::endl;
     oss << "  Threads:                    " << kg_elems * tg_elems << " (utilization: "
-        << get_thread_utilization(exec_cfg(), kg_elems, tg_elems) << "% thread, "
-        << get_wave_utilization(exec_cfg(), kg_elems, tg_elems) << "% wave)" << std::endl;
+        << get_thread_utilization(options(), kg_elems, tg_elems) << "% thread, "
+        << get_wave_utilization(options(), kg_elems, tg_elems) << "% wave)" << std::endl;
     oss << "  FMA kind:                   " << to_string(fma_kind()) << std::endl;
     oss << "  SLM buffering:              " << "A: " << to_string(slm().a()) << ", B: " << to_string(slm().b())
                                             << ", buffers: " << slm().bufs() << ", pad: " << to_string(pad_slm()) << std::endl;

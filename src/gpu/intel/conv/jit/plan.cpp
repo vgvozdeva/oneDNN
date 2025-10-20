@@ -812,13 +812,24 @@ std::string prefetch_plan_t::str() const {
 
 bool x2r_plan_t::can_split(abc_kind_t abc, int factor) const {
     if (factor == 1) return true;
+
+    auto has_outer_block
+            = [](const layout_t &layout, dim_t block, const pvar_t &idx = {}) {
+                  if (block == 1) return true;
+                  if (layout.blocks().empty()) return false;
+                  auto &b = layout.blocks().back();
+                  if (!idx.is_undef() && b.idx != idx) return false;
+                  if (b.size % block != 0) return false;
+                  return true;
+              };
+
     bool is_a = (abc == abc_kind_t::a);
     auto &load = (is_a ? a_load : b_load);
     auto &reorder = (is_a ? a_reorder : b_reorder);
     auto &layout = (is_a ? a_layout : b_layout);
-    if (!layout.has_outer_block(factor)) return false;
-    auto &dim = layout.blocks().back().dim;
-    if (reorder && !reorder.src.has_outer_block(factor, dim)) return false;
+    if (!has_outer_block(layout, factor)) return false;
+    auto &idx = layout.blocks().back().idx;
+    if (reorder && !has_outer_block(reorder.src, factor, idx)) return false;
     if (!load.can_split(factor)) return false;
     if (!x_reduce.can_split(factor)) return false;
     return true;
@@ -876,16 +887,16 @@ std::string x2r_plan_t::str() const {
     return add_indent("x2r_plan", oss.str());
 }
 
-int get_dpas_block_rcount(const layout_t &layout, const pvar_t &dim) {
+int get_dpas_block_rcount(const layout_t &layout, const pvar_t &idx) {
     if (layout.nblocks() < 2) return 1;
 
     auto &b0 = layout[0];
-    if (b0.block * layout.type().size() > 32) return 1;
+    if (b0.size * layout.type().size() > 32) return 1;
 
     auto &b1 = layout[1];
-    if (b1.dim != dim) return 1;
+    if (b1.idx != idx) return 1;
 
-    int block_rcount = (int)b1.block;
+    int block_rcount = (int)b1.size;
     int max_rcount = 8;
 
     if (block_rcount % max_rcount == 0) return max_rcount;
@@ -906,8 +917,8 @@ bool fma_plan_t::can_split(abc_kind_t abc, int factor) const {
     auto &blocks = layout.blocks();
     if (blocks.empty()) return false;
     auto &b = blocks.back();
-    if (b.dim.index() != mn_idx) return false;
-    if ((int)b.block % factor != 0) return false;
+    if (b.idx.index() != mn_idx) return false;
+    if ((int)b.size % factor != 0) return false;
     return true;
 }
 
@@ -919,7 +930,7 @@ void fma_plan_t::set_split(abc_kind_t abc, int factor) {
             && utils::one_of(fma_kind, fma_kind_t::dp4a, fma_kind_t::dpas,
                     fma_kind_t::dpasw)) {
         auto blocks = a_layout.blocks();
-        blocks.back().block /= factor;
+        blocks.back().size /= factor;
         auto layout = layout_t(a_layout.type(), blocks);
         m_blk = get_dpas_block_rcount(layout, 1);
     }
@@ -1046,8 +1057,8 @@ std::vector<func_t> fma_plan_t::create_fma_funcs(const hw_t &hw) const {
     switch (fma_kind) {
         case fma_kind_t::mad: {
             int simd = max_bmn_blk();
-            int a_stride = is_a_broadcast() ? 0 : (int)a[0].stride;
-            int b_stride = is_b_broadcast() ? 0 : (int)b[0].stride;
+            int a_stride = is_a_broadcast() ? 0 : int(a[0].stride);
+            int b_stride = is_b_broadcast() ? 0 : int(b[0].stride);
             auto mad = mad_t::make(
                     hw, c.type(), simd, a.type(), a_stride, b.type(), b_stride);
             ret.push_back(mad);
@@ -1257,6 +1268,27 @@ type_t get_accumulation_type(
     return type_t::f32();
 }
 
+layout_t make_with_block(const layout_t &base, const layout_t &inner) {
+    gpu_assert(base.type() == inner.type());
+    auto cur_tile = base.tile();
+    tile_t rem_tile;
+    for (auto &d : cur_tile)
+        rem_tile[d] = ir_utils::safe_divide(cur_tile.at(d), inner.elems(d));
+    auto ret = base.with(inner.blocks());
+    for (auto &b : base.blocks()) {
+        auto &d = cur_tile[b.idx];
+        auto &r = rem_tile[b.idx];
+        d = ir_utils::safe_divide(d, b.size);
+        if (r <= d) continue;
+        auto blk = ir_utils::safe_divide(r, d);
+        ret = ret.with_block({b.idx, blk});
+        r = ir_utils::safe_divide(r, blk);
+    }
+    for (auto &d : rem_tile)
+        gpu_assert(rem_tile[d] == 1);
+    return ret;
+}
+
 struct fma_layout_hint_t {
     int vec_dim_idx = -1;
 
@@ -1343,7 +1375,7 @@ struct fma_context_t {
             auto bmnk_layout
                     = mapper.map_to_bmnk(abc, bmnks, layout).with(type);
             auto fma_layout
-                    = bmnk_layout.make_with_block(layout_t(type, blocks));
+                    = make_with_block(bmnk_layout, layout_t(type, blocks));
             auto abc_layout
                     = mapper.map_from_bmnk(abc, bmnks, fma_layout, layout);
             if (cvt_f16) return abc_layout.with(type_t::f16());
@@ -1361,8 +1393,8 @@ struct fma_context_t {
             blocks.emplace_back(hint.vec_dim_idx, vec_size);
             auto bmnks = get_bmnk_kinds(abc, /*with_batch=*/true);
             auto bmnk_layout = mapper.map_to_bmnk(abc, bmnks, ret);
-            auto fma_layout
-                    = bmnk_layout.make_with_block(layout_t(ret.type(), blocks));
+            auto fma_layout = make_with_block(
+                    bmnk_layout, layout_t(ret.type(), blocks));
             auto abc_layout = mapper.map_from_bmnk(abc, bmnks, fma_layout, ret);
             if (layout.type().is_x8()) {
                 gpu_assert(abc_layout.type().is_s16());
@@ -1425,8 +1457,8 @@ struct fma_context_t {
                       if (block == 1) return true;
                       if (layout.nblocks() == 0) return false;
                       auto &b0 = layout[0];
-                      if (b0.dim != dim) return false;
-                      if (b0.block % block != 0) return false;
+                      if (b0.idx != dim) return false;
+                      if (b0.size % block != 0) return false;
                       return true;
                   };
         if (a_vec_idx != -1 && !is_blocked_by(a, a_vec_idx, vec_size))
@@ -1487,8 +1519,8 @@ dim_t find_min_stride_without_conflicts(
     int stride_step = 16;
     dim_t stride_beg = dense_stride_bytes;
     dim_t stride_end = 2 * dense_stride_bytes;
-    const int slm_banks = slm_memory_bank_count(hw.to_ngen());
-    const int bank_granularity = slm_memory_bank_granularity(hw.to_ngen());
+    const int slm_banks = slm_memory_bank_count(hw);
+    const int bank_granularity = slm_memory_bank_granularity(hw);
     for (dim_t s = stride_beg; s < stride_end; s += stride_step) {
         bool ok = true;
         for (dim_t off0 = 0; off0 < inner_bytes; off0 += write_step) {
@@ -1518,6 +1550,44 @@ dim_t find_min_stride_without_conflicts(
     return dense_stride_bytes;
 }
 
+// Splits blocks so that they can be used to form `multi_blocks` without
+// crossing the block boundaries. `multi_blocks` are ordered from innermost to
+// outermost. Returns an empty layout if such a split is not possible.
+// Example (all blocks are ordered from innermost to outermost):
+//     Input blocks:  [4, 4, 2]
+//     Multi-blocks:  [8, 2]
+//     Output blocks: [4, 2, 2, 2]
+layout_t split_into_multi_blocks(
+        const layout_t &layout, const std::vector<dim_t> &multi_blocks) {
+    if (layout.is_empty()) return layout;
+
+    layout_t tmp(layout);
+    std::vector<dim_t> rem_elems = multi_blocks;
+    std::vector<dim_t> cur_elems(rem_elems.size(), 1);
+    for (auto &b : tmp.blocks()) {
+        for (int i = 0; i < int(rem_elems.size()); i++) {
+            auto &e = rem_elems[i];
+            if (e == 1) continue;
+            if (b.size > e) {
+                // Try to split this block.
+                dim_t next_block = utils::max_div(b.size, e);
+                if (next_block == 1) return layout_t();
+                return split_into_multi_blocks(
+                        tmp.split_block(b, next_block, b.size / next_block),
+                        multi_blocks);
+            }
+            if (e % b.size != 0) return layout_t();
+            e /= b.size;
+            cur_elems[i] *= b.size;
+            break;
+        }
+    }
+    for (int i = 0; i < int(cur_elems.size()); i++) {
+        if (cur_elems[i] != multi_blocks[i]) { return layout_t(); }
+    }
+    return tmp;
+}
+
 layout_t pad_slm_layout(
         const hw_t &hw, const layout_t &layout, const grid_info_t &grid) {
     // EUs are fused only in XeHP and XeHPG; otherwise no need to pad SLM.
@@ -1533,30 +1603,30 @@ layout_t pad_slm_layout(
     dim_t per_thr_bytes = (inner_block * type_size) / tg_dim1;
 
     std::vector<dim_t> multi_blocks = {inner_block, tg_dim0};
-    auto l = layout.split_into_multi_blocks(multi_blocks);
+    auto l = split_into_multi_blocks(layout, multi_blocks);
 
     if (l.is_empty()) {
         gpu_warning() << "Couldn't split layout for SLM padding.";
         return layout;
     }
     auto padded_blocks = l.blocks();
-    dim_t stride = -1;
+    stride_t stride;
     dim_t remaining_elems = inner_block;
     bool past_inner_block = remaining_elems == 1;
     for (auto &b : padded_blocks) {
         if (past_inner_block) {
-            if (stride == -1) {
+            if (stride.is_undefined()) {
                 dim_t stride_bytes = find_min_stride_without_conflicts(
                         hw, per_thr_bytes, dim_t(b.stride) * type_size);
                 gpu_assert(stride_bytes % type_size == 0);
                 stride = stride_bytes / type_size;
             }
             b.stride = stride;
-            stride = b.stride * b.block;
+            stride = b.stride * b.size;
             continue;
         }
-        gpu_assert(remaining_elems % b.block == 0);
-        remaining_elems /= b.block;
+        gpu_assert(remaining_elems % b.size == 0);
+        remaining_elems /= b.size;
         if (remaining_elems == 1) past_inner_block = true;
     }
     return layout.with(padded_blocks);
@@ -1594,10 +1664,10 @@ reduce_mask_t reduce_mask(const config_t &cfg, abc_kind_t abc) {
     return reduce_mask_t((1 << 1) | (1 << 2));
 }
 
-std::vector<int> get_reduce_dim_map(uint32_t mask, dim_idx_t &ndims) {
-    std::vector<int> ret(ndims, -1);
-    dim_idx_t dst_idx = 0;
-    for (dim_idx_t i = 0; i < ndims; i++) {
+std::vector<size_t> get_reduce_dim_map(uint32_t mask, size_t &ndims) {
+    std::vector<size_t> ret(ndims, dim_idx::invalid);
+    size_t dst_idx = 0;
+    for (size_t i = 0; i < ndims; i++) {
         if ((mask & (1 << i)) == 0) continue;
         ret[i] = dst_idx++;
     }
@@ -1606,13 +1676,13 @@ std::vector<int> get_reduce_dim_map(uint32_t mask, dim_idx_t &ndims) {
 }
 
 tile_coord_t to_reduce_tensor(
-        dim_idx_t ndims, const tile_coord_t &tile_coord, uint32_t mask) {
-    dim_idx_t reduce_ndims = ndims;
+        size_t ndims, const tile_coord_t &tile_coord, uint32_t mask) {
+    size_t reduce_ndims = ndims;
     auto map = get_reduce_dim_map(mask, reduce_ndims);
     tile_t reduce_dims;
     coord_t reduce_start;
-    for (dim_idx_t i = 0; i < ndims; i++) {
-        if (map[i] == -1) continue;
+    for (size_t i = 0; i < ndims; i++) {
+        if (map[i] == dim_idx::invalid) continue;
         reduce_dims[map[i]] = tile_coord.tile.get(i);
         reduce_start[map[i]] = tile_coord.coord.get(i);
     }
@@ -1621,13 +1691,13 @@ tile_coord_t to_reduce_tensor(
 
 layout_t to_reduce_layout(
         const config_t &cfg, const layout_t &layout, uint32_t mask) {
-    dim_idx_t reduce_ndims = layout.ndims();
+    size_t reduce_ndims = layout.ndims();
     auto map = get_reduce_dim_map(mask, reduce_ndims);
     std::vector<layout_block_t> reduce_blocks;
     for (auto &b : layout.blocks()) {
-        if (map[b.dim] == -1) continue;
+        if (map[b.idx] == dim_idx::invalid) continue;
         auto bb = b;
-        bb.dim = map[b.dim];
+        bb.idx = map[b.idx];
         reduce_blocks.push_back(bb);
     }
     auto type = get_accumulation_type(cfg, layout.type(), layout.type());
@@ -1657,11 +1727,11 @@ public:
         std::vector<layout_block_t> blocks;
         bool seen = false;
         for (auto &b : layout.blocks()) {
-            if (b.block == 1) continue;
-            auto &tdim = view_.tdim(b.dim);
-            if (b.dim.index() != fused_tidx_) {
+            if (b.size == 1) continue;
+            auto &tdim = view_.tdim(b.idx);
+            if (b.idx.index() != fused_tidx_) {
                 auto vb = b;
-                vb.dim = tdim.vidx(0);
+                vb.idx = tdim.vidx(0);
                 blocks.push_back(vb);
                 continue;
             }
@@ -1671,8 +1741,8 @@ public:
                 int vidx = tdim.vidx(i);
                 dim_t vstride = (dim_t)tdim.vstride(i);
                 auto vb = b;
-                vb.dim = vidx;
-                vb.block = view_.vdims()[vidx];
+                vb.idx = vidx;
+                vb.size = view_.vdims()[vidx];
                 vb.stride = b.stride * vstride;
                 blocks.push_back(vb);
             }
@@ -1771,7 +1841,7 @@ private:
 layout_t add_batch(const layout_t &layout) {
     auto blocks = layout.blocks();
     for (auto &b : blocks) {
-        b.dim = b.dim + 1;
+        b.idx = b.idx + 1;
     }
     return layout.with(blocks);
 }
@@ -1813,17 +1883,17 @@ layout_t get_c_layout(const layout_t &a_layout, const layout_t &b_layout,
     const bmnk_kind_t b_bmnks[3]
             = {bmnk_kind_t::b, bmnk_kind_t::k, bmnk_kind_t::n};
     for (auto &b : a_layout.blocks()) {
-        if (a_bmnks[b.dim] == bmnk_kind_t::k) continue;
+        if (a_bmnks[b.idx] == bmnk_kind_t::k) continue;
         blocks.push_back(b);
     }
     for (auto &b : b_layout.blocks()) {
-        if (utils::one_of(b_bmnks[b.dim], bmnk_kind_t::b, bmnk_kind_t::k))
+        if (utils::one_of(b_bmnks[b.idx], bmnk_kind_t::b, bmnk_kind_t::k))
             continue;
         blocks.push_back(b);
     }
 
     layout_t c_layout(c_blk_layout.type(), blocks, 0, c_blk_layout.ndims());
-    c_layout = c_layout.make_with_block(c_blk_layout);
+    c_layout = make_with_block(c_layout, c_blk_layout);
     return c_layout;
 }
 
@@ -1962,7 +2032,7 @@ private:
         int bound = cfg_.regs() - tmp_regs;
         if (plan.grf_usage().total() < bound) return plan_status_t::success;
         // Do not downsize grf mode at the cost of disabling below optimizations.
-        if (cfg_.exec_cfg().hw().large_grf_support() && cfg_.regs() <= 128
+        if (cfg_.options().hw().large_grf_support() && cfg_.regs() <= 128
                 && default_regs(cfg_) != 128)
             return plan_status_t::out_of_registers;
         plan_status_t status;
@@ -2086,18 +2156,19 @@ private:
         slm_layout = get_slm_layout(
                 fma_ctx_, abc, gemm_schedule_.bmnk_mapper(), tg_view, tg);
         if (slm_layout == layout_t()) return plan_status_t::invalid_slm_layout;
-        auto thr_tile_coord = slm_layout.split(tg, &grid);
+        auto thr_tile_coord = split(slm_layout, tg, &grid);
         auto abs_thr_tile_coord = tg_view.vtile_coord().sub(thr_tile_coord);
-        auto slm_thr_layout = slm_layout.sub(thr_tile_coord);
+        auto slm_thr_layout
+                = slm_layout.sub(thr_tile_coord.tile, thr_tile_coord.coord);
         auto slm_thr_view = view_t(slm_thr_layout);
         auto thr_view = tg_view.create_sub_view(thr_tile_coord);
-        auto load_params = get_send_params(cfg_.exec_cfg(), send_op_t::load,
+        auto load_params = get_send_params(cfg_.options(), send_op_t::load,
                 send_address_t::a64, abc, thr_view);
-        auto store_params = get_send_params(cfg_.exec_cfg(), send_op_t::store,
+        auto store_params = get_send_params(cfg_.options(), send_op_t::store,
                 send_address_t::slm, abc, slm_thr_view);
-        g2s_load = create_send_plan(cfg_.exec_cfg(), thr_view, load_params);
+        g2s_load = create_send_plan(cfg_.options(), thr_view, load_params);
         g2s_store
-                = create_send_plan(cfg_.exec_cfg(), slm_thr_view, store_params);
+                = create_send_plan(cfg_.options(), slm_thr_view, store_params);
         auto &src = g2s_load.reg_layout();
         auto &dst = g2s_store.reg_layout();
         reorder = create_reorder_plan(cfg_.hw(), src, dst);
@@ -2140,10 +2211,10 @@ private:
         if (!use_prefetch(abc)) return plan_status_t::success;
         auto &tg = cfg_.thread_group_grid();
         auto thr_view = tg_view.split(tg, &grid);
-        auto params = get_send_params(cfg_.exec_cfg(), send_op_t::prefetch,
+        auto params = get_send_params(cfg_.options(), send_op_t::prefetch,
                 send_address_t::a64, fma_kind_t::undef, abc, thr_view,
                 gemm_schedule_);
-        prefetch = create_send_plan(cfg_.exec_cfg(), thr_view, params);
+        prefetch = create_send_plan(cfg_.options(), thr_view, params);
         return plan_status_t::success;
     }
 
@@ -2163,9 +2234,9 @@ private:
             tile_coord_t *reduce_tile_coord = nullptr) const {
         if (!has_x_slm) return plan_status_t::success;
         auto thr_view = view_t(slm_layout).create_sub_view(thr_tile_coord);
-        auto params = get_send_params(cfg_.exec_cfg(), send_op_t::load,
+        auto params = get_send_params(cfg_.options(), send_op_t::load,
                 send_address_t::slm, abc, thr_view);
-        load = create_send_plan(cfg_.exec_cfg(), thr_view, params);
+        load = create_send_plan(cfg_.options(), thr_view, params);
         layout = load.reg_layout();
         if (reduce_mask && !cfg_.allow_global_reduction()) {
             *reduce_tile_coord = to_reduce_tensor(
@@ -2197,11 +2268,11 @@ private:
                 = (abc == abc_kind_t::a ? a_direct_view_ : b_direct_view_);
         const auto &load_view = direct_view ? direct_view.get() : gmem_view;
 
-        auto params = get_send_params(cfg_.exec_cfg(), send_op_t::load,
+        auto params = get_send_params(cfg_.options(), send_op_t::load,
                 send_address_t::a64, cfg_.fma_kind(), abc, load_view,
                 gemm_schedule_,
                 /*allow_2d_load=*/true);
-        load = create_send_plan(cfg_.exec_cfg(), load_view, params);
+        load = create_send_plan(cfg_.options(), load_view, params);
 
         auto reg_layout = load.reg_layout();
         if (direct_view) {
@@ -2244,18 +2315,18 @@ private:
         if (k_tg == 1) return plan_status_t::success;
 
         auto l = plan_.fma.c_prb_layout;
-        int ndims = l.ndims();
+        size_t ndims = l.ndims();
         auto blocks = l.blocks();
-        l = l.add_outer_block(ndims, k_tg);
+        l = l.with_block({ndims, k_tg});
         int outer = 1;
         auto rem_dims = l.tile();
         for (int i = (int)blocks.size() - 1; i >= 0; i--) {
             auto &b = blocks[i];
-            for (dim_t j = 2; j <= b.block; j++) {
-                if (b.block % j != 0) continue;
+            for (dim_t j = 2; j <= b.size; j++) {
+                if (b.size % j != 0) continue;
                 if (outer * j > k_tg) break;
-                if (outer * j == k_tg || j == b.block) {
-                    rem_dims[b.dim] /= j;
+                if (outer * j == k_tg || j == b.size) {
+                    rem_dims[b.idx] /= j;
                     outer *= j;
                     break;
                 }
@@ -2265,13 +2336,13 @@ private:
 
         if (plan_.hw < ngen::HW::XeHPG) {
             // Verifies that SLM loads after k-slicing are at GRF granularity.
-            auto l_sub = l.sub(tile_t(rem_dims));
+            auto l_sub = l.sub(tile_t(std::move(rem_dims)));
             int bytes = l_sub.type().size();
             stride_t stride = 1;
             for (auto &b : l_sub.blocks()) {
                 if (b.stride != stride) break;
-                bytes *= (int)b.block;
-                stride *= b.block;
+                bytes *= (int)b.size;
+                stride *= b.size;
             }
             if (bytes % plan_.grf_size() != 0)
                 return plan_status_t::invalid_slm_k_slicing;
@@ -2281,16 +2352,15 @@ private:
 
     plan_status_t fixup_k_blocks_order(layout_t &a, layout_t &b) const {
         auto &bmnk_mapper = gemm_schedule_.bmnk_mapper();
-        object_map_t<expr_t, int> k_vars;
+        object_map_t<expr_t, pvar_t> k_vars;
         auto k_sub_layout = [&](abc_kind_t abc_kind, const layout_t &l) {
-            layout_t k_layout = layout_t(
-                    type_t::u8(), std::vector<dim_t>(layout_t::max_ndims, 1));
+            layout_t k_layout = layout_t(type_t::u8());
             for (auto &b : l.blocks()) {
-                auto bmnk_kind = bmnk_mapper.bmnk_kind(abc_kind, b.dim);
+                auto bmnk_kind = bmnk_mapper.bmnk_kind(abc_kind, b.idx);
                 if (bmnk_kind != bmnk_kind_t::k) continue;
-                auto &var = bmnk_mapper.var(abc_kind, b.dim);
-                auto ret = k_vars.emplace(var, (int)k_vars.size());
-                k_layout = k_layout.add_outer_block(ret.first->second, b.block);
+                auto &var = bmnk_mapper.var(abc_kind, b.idx);
+                auto ret = k_vars.emplace(var, k_vars.size());
+                k_layout = k_layout.with_block({ret.first->second, b.size});
             }
             return k_layout;
         };
@@ -2305,15 +2375,15 @@ private:
             auto &a1 = a_k[1];
             auto &b0 = b_k[0];
             auto &b1 = b_k[1];
-            bool dims_ok = (a0.dim == b1.dim) && (a1.dim == b0.dim);
-            bool blocks_ok = (a0.block == b1.block) && (a1.block == b0.block);
+            bool dims_ok = (a0.idx == b1.idx) && (a1.idx == b0.idx);
+            bool blocks_ok = (a0.size == b1.size) && (a1.size == b0.size);
             if (dims_ok && blocks_ok) {
                 auto a_blocks = a.blocks();
                 constexpr size_t unset = -1;
                 size_t i0 = unset;
                 size_t i1 = unset;
                 for (size_t i = 0; i < a.nblocks(); i++) {
-                    if (bmnk_mapper.bmnk_kind(abc_kind_t::a, a_blocks[i].dim)
+                    if (bmnk_mapper.bmnk_kind(abc_kind_t::a, a_blocks[i].idx)
                             == bmnk_kind_t::k) {
                         if (i0 == unset) {
                             i0 = i;
@@ -2395,23 +2465,23 @@ private:
                 m_blk = get_dpas_block_rcount(a_layout, 1);
                 n_blk = simd;
                 k_blk = sdepth * dword_size / ab_type_size;
-                c_blk_layout = c_blk_layout.add_outer_block(2, n_blk);
-                c_blk_layout = c_blk_layout.add_outer_block(1, m_blk);
+                c_blk_layout = c_blk_layout.with_block({2, n_blk});
+                c_blk_layout = c_blk_layout.with_block({1, m_blk});
                 break;
             }
             case fma_kind_t::mad:
                 if (fma_ctx.can_vectorize_by(
                             bmnk_kind_t::b, a_layout, b_layout)) {
                     b_blk = vec_size;
-                    c_blk_layout = c_blk_layout.add_outer_block(0, vec_size);
+                    c_blk_layout = c_blk_layout.with_block({0, vec_size});
                 } else if (fma_ctx.can_vectorize_by(
                                    bmnk_kind_t::n, a_layout, b_layout)) {
                     n_blk = vec_size;
-                    c_blk_layout = c_blk_layout.add_outer_block(2, vec_size);
+                    c_blk_layout = c_blk_layout.with_block({2, vec_size});
                 } else if (fma_ctx.can_vectorize_by(
                                    bmnk_kind_t::m, a_layout, b_layout)) {
                     m_blk = vec_size;
-                    c_blk_layout = c_blk_layout.add_outer_block(1, vec_size);
+                    c_blk_layout = c_blk_layout.with_block({1, vec_size});
                 } else {
                     fma_ctx.set_layout_hints(a_layout, b_layout);
                     return plan_status_t::invalid_fma_layout;
@@ -2519,21 +2589,23 @@ private:
         return plan_ptr;
     }
 
-    send_params_t get_send_params(const exec_config_t &exec_cfg, send_op_t op,
-            send_address_t address, abc_kind_t abc, const view_t &view) const {
-        auto params = jit::get_send_params(exec_cfg, op, address, view);
+    send_params_t get_send_params(const kernel::options_t &options,
+            send_op_t op, send_address_t address, abc_kind_t abc,
+            const view_t &view) const {
+        auto params = jit::get_send_params(options, op, address, view);
         bool allow_send_2d
                 = (abc == abc_kind_t::a ? allow_a_send_2d_ : allow_b_send_2d_);
         if (!allow_send_2d) params.hint_2d.enable = false;
         return params;
     }
 
-    send_params_t get_send_params(const exec_config_t &exec_cfg, send_op_t op,
-            send_address_t address, fma_kind_t fma, abc_kind_t abc,
-            const view_t &view, const gemm_schedule_t &gemm_schedule,
+    send_params_t get_send_params(const kernel::options_t &options,
+            send_op_t op, send_address_t address, fma_kind_t fma,
+            abc_kind_t abc, const view_t &view,
+            const gemm_schedule_t &gemm_schedule,
             bool allow_2d_load = true) const {
-        auto params = jit::get_send_params(exec_cfg, op, address, fma, abc,
-                view, gemm_schedule, allow_2d_load);
+        auto params = jit::get_send_params(options, op, address, fma, abc, view,
+                gemm_schedule, allow_2d_load);
         bool allow_send_2d
                 = (abc == abc_kind_t::a ? allow_a_send_2d_ : allow_b_send_2d_);
         if (!allow_send_2d) params.hint_2d.enable = false;

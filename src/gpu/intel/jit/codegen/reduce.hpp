@@ -65,7 +65,7 @@ public:
         int dst_stride
                 = dst_tile_blocks.empty() ? 1 : (int)dst_tile_blocks[0].stride;
         int grf_size = ngen::GRF::bytes(hw_);
-        src_layout_.for_each_tile(tile, [&](const icoord_t &src_start) {
+        for (auto &src_start : src_layout_.iter(tile)) {
             ngen_register_scope_t tile_scope(scope.register_allocator());
             auto dst_start = src_start;
             for (dim_idx_t i = 0; i < dst_layout_.ndims(); i++) {
@@ -114,12 +114,12 @@ public:
             }
             align_src_dst_offset(host, tile_scope, tile_elems, d, s);
             host->add(tile_elems, d.reg_data(), d.reg_data(), s.reg_data());
-        });
+        }
     }
 
 private:
     tile_t find_1d_tile(layout_t a, layout_t b) const {
-        layout_t::align_layouts(a, b);
+        align_layouts(a, b);
 
         gpu_assert(!a.blocks().empty());
         // Allow trivial tile for scalar dst.
@@ -128,10 +128,10 @@ private:
         auto &a0 = a[0];
         auto &b0 = b[0];
 
-        bool ok = (a0.dim == b0.dim && a0.block == b0.block);
+        bool ok = (a0.idx == b0.idx && a0.size == b0.size);
         if (!ok) {
             // Try to match strided layout.
-            if (a0.block == 2) {
+            if (a0.size == 2) {
                 auto a_blocks = a.blocks();
                 a_blocks.erase(a_blocks.begin());
                 a = a.with(a_blocks);
@@ -152,16 +152,16 @@ private:
 
         min_step = std::min(
                 std::min(hw_ <= ngen::HW::XeLP ? 8 : simd_size_, min_step),
-                (int)a0.block);
+                (int)a0.size);
 
-        if (a0.block % min_step != 0) {
+        if (a0.size % min_step != 0) {
             // TODO: Extend implementation to support this case.
             gpu_except_not_implemented("Reduction is not supported.");
         }
 
         std::vector<dim_t> tile_dims(src_layout_.ndims(), 1);
-        tile_dims[a0.dim]
-                = ir_utils::max_divisor(int(a0.block), {min_step, max_step});
+        tile_dims[a0.idx]
+                = ir_utils::max_divisor(int(a0.size), {min_step, max_step});
 
         return tile_t(tile_dims);
     }

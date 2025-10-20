@@ -26,22 +26,117 @@ namespace gpu {
 namespace intel {
 namespace jit {
 
-std::vector<layout_block_t> normalize_blocks(
-        const std::vector<layout_block_t> &blocks, bool remove_size_1_blocks) {
-    if (blocks.empty()) return {};
-    std::vector<layout_block_t> res;
+tile_coord_t split(const layout_t &layout, const grid_info_t &grid_info,
+        grid_info_t *out_grid) {
+    tile_coord_t min_tile_coord = tile_coord_t::invalid();
+    std::vector<dim_t> cur_dims(grid_info.ndims(), 1);
 
-    for (const layout_block_t &block : blocks) {
-        if (remove_size_1_blocks && block.block == 1) continue;
-
-        if (!res.empty() && res.back().can_merge(block)) {
-            res.back().block *= block.block;
-        } else {
-            res.emplace_back(block);
+    for (int iter = 0; iter < grid_info.elems(); iter++) {
+        for (dim_idx_t i = 0; i < grid_info.ndims(); i++) {
+            if (++cur_dims[i] <= grid_info.dim(i)) break;
+            cur_dims[i] = 1;
+        }
+        auto sub_grid = grid_info.resize(cur_dims);
+        auto tile_coord = split_exact(layout, sub_grid);
+        if (tile_coord.is_invalid()) continue;
+        if (min_tile_coord.is_invalid()
+                || tile_coord.elems() < min_tile_coord.elems()) {
+            min_tile_coord = std::move(tile_coord);
+            if (out_grid) { *out_grid = std::move(sub_grid); }
         }
     }
+    return min_tile_coord;
+}
 
-    return res;
+tile_coord_t split_exact(const layout_t &layout, const grid_info_t &grid) {
+    tile_t tile;
+    if (layout.elems() % grid.elems() != 0) return tile_coord_t::invalid();
+
+    dim_t cur_elems_per_tile = 1;
+    dim_t elems_per_tile = layout.elems() / grid.elems();
+    for (auto &b : layout.blocks()) {
+        dim_t block = std::min(b.size, elems_per_tile / cur_elems_per_tile);
+        tile[b.idx] = tile.get(b.idx, 1) * block;
+        cur_elems_per_tile *= block;
+    }
+    if (cur_elems_per_tile != elems_per_tile) return tile_coord_t::invalid();
+
+    return split(layout, tile, grid);
+}
+
+tile_coord_t split_exact(const layout_t &layout, int factor) {
+    if (factor == 1) return tile_coord_t(layout.tile());
+    if (layout.elems() % factor != 0) return tile_coord_t::invalid();
+    dim_t cur_elems = 1;
+    dim_t split_elems = layout.elems() / factor;
+    std::vector<layout_block_t> split_blocks;
+    for (auto &b : layout.blocks()) {
+        if (cur_elems * b.size > split_elems) {
+            if (split_elems % cur_elems != 0) return tile_coord_t::invalid();
+            auto bb = b;
+            bb.size = split_elems / cur_elems;
+            if (b.size % bb.size != 0) return tile_coord_t::invalid();
+            split_blocks.push_back(bb);
+        } else {
+            split_blocks.push_back(b);
+        }
+        cur_elems *= split_blocks.back().size;
+        if (cur_elems == split_elems) break;
+    }
+    tile_t split_tile;
+    for (auto &b : split_blocks)
+        split_tile[b.idx] = split_tile.get(b.idx, 1) * b.size;
+    return tile_coord_t(split_tile);
+}
+
+tile_coord_t split(const layout_t &layout, const tile_t &tile,
+        const grid_info_t &grid, std::vector<layout_block_t> *outer_blocks) {
+    if (outer_blocks) outer_blocks->resize(0);
+
+    if (grid.elems() == 1) return tile_coord_t(tile);
+
+    dim_t total_elems = layout.elems();
+    dim_t tile_elems = tile.elems();
+
+    grid_splitter_t grid_splitter(grid);
+    gpu_assert(tile_elems * grid.elems() == total_elems)
+            << "Tile/grid dimensions do not match.";
+    MAYBE_UNUSED(total_elems);
+    MAYBE_UNUSED(tile_elems);
+
+    tile_t dims;
+    coord_t start;
+    auto rem_tile = tile;
+    for (auto &b : layout.blocks()) {
+        if (b.size == 1) continue;
+
+        dim_t &e = rem_tile[b.idx];
+        if (e > 1) {
+            if (e % b.size == 0) {
+                e /= b.size;
+            } else if (b.size % e == 0) {
+                auto tmp_layout = layout.split_block(b, e, b.size / e);
+                return split(tmp_layout, tile, grid, outer_blocks);
+            } else {
+                return tile_coord_t::invalid();
+            }
+        } else {
+            dim_t next_chunk = math::gcd(b.size, grid_splitter.cur_block());
+            if (b.size == next_chunk) {
+                auto idx = grid_splitter.pop_block(next_chunk);
+                start[b.idx] += idx * dims[b.idx];
+                if (outer_blocks) outer_blocks->push_back(b);
+            } else if (b.size % next_chunk == 0 && next_chunk != 1) {
+                auto tmp_layout = layout.split_block(
+                        b, next_chunk, b.size / next_chunk);
+                return split(tmp_layout, tile, grid, outer_blocks);
+            } else {
+                return tile_coord_t::invalid();
+            }
+        }
+        dims[b.idx] *= b.size;
+    }
+    return tile_coord_t(tile, start);
 }
 
 memory_desc_t to_md(const layout_t &l, const memory_desc_t &md_hint) {
@@ -62,26 +157,26 @@ memory_desc_t to_md(const layout_t &l, const memory_desc_t &md_hint) {
 
     for (auto it = l.blocks().rbegin(); it != l.blocks().rend(); ++it) {
         auto &b = *it;
-        if (!seen[b.dim]) {
+        if (!seen[b.idx]) {
             // Outer block.
             gpu_assert(!in_inner_block);
             MAYBE_UNUSED(in_inner_block);
-            blk.strides[b.dim] = b.stride;
-            md.padded_dims[b.dim] = b.block;
+            blk.strides[b.idx] = dim_t(b.stride);
+            md.padded_dims[b.idx] = b.size;
         } else {
             // Inner block.
-            md.padded_dims[b.dim] *= b.block;
-            blk.inner_idxs[blk.inner_nblks] = b.dim;
-            blk.inner_blks[blk.inner_nblks] = b.block;
+            md.padded_dims[b.idx] *= b.size;
+            blk.inner_idxs[blk.inner_nblks] = b.idx;
+            blk.inner_blks[blk.inner_nblks] = b.size;
             blk.inner_nblks++;
             if (prev_stride > 0) {
                 // Inner block must be dense.
-                gpu_assert(prev_stride == b.block * dim_t(b.stride));
+                gpu_assert(prev_stride == b.size * dim_t(b.stride));
             }
-            prev_stride = b.stride;
+            prev_stride = dim_t(b.stride);
             in_inner_block = true;
         }
-        seen[b.dim] = true;
+        seen[b.idx] = true;
     }
 
     for (int i = 0; i < ndims; i++) {
@@ -92,44 +187,6 @@ memory_desc_t to_md(const layout_t &l, const memory_desc_t &md_hint) {
     }
 
     return md;
-}
-
-layout_t layout_t::sub(const tile_t &tile, const coord_t &start) const {
-    auto remaining_tile = tile;
-    std::vector<layout_block_t> mapped_blocks;
-
-    for (auto &b : blocks()) {
-        bool b_is_outermost = is_outermost(b);
-
-        dim_t block = b.block;
-        if (!remaining_tile.has(b.dim)) remaining_tile[b.dim] = 1;
-        dim_t &rem_dim = remaining_tile[b.dim];
-        if (rem_dim == 1) {
-            if (b_is_outermost) {
-                // This is to have similarity between the current and
-                // mapped layouts.
-                mapped_blocks.emplace_back(b.dim, 1, b.stride);
-            }
-            continue;
-        }
-        if (b_is_outermost) {
-            block = rem_dim;
-        } else if (rem_dim % block != 0) {
-            // Try to split the current block and start mapping from
-            // scratch.
-            if (block % rem_dim == 0)
-                return split_block(b, rem_dim, block / rem_dim)
-                        .sub(tile, start);
-
-            // TODO: Remove exception usage.
-            gpu_except_not_implemented("Can't map tensor layout.");
-        }
-        rem_dim /= block;
-        mapped_blocks.emplace_back(b.dim, block, b.stride);
-    }
-
-    return layout_t(type(), mapped_blocks,
-            start.is_empty() ? 0 : operator()(start), ndims_);
 }
 
 layout_t reinterpret(
@@ -165,7 +222,7 @@ layout_t reinterpret(
 
     if (new_size < old_size) {
         int factor = (old_size / new_size);
-        b0.block *= factor;
+        b0.size *= factor;
         // Recompute strides.
         for (auto &b : new_blocks) {
             if (&b == &b0) continue;
@@ -173,11 +230,11 @@ layout_t reinterpret(
         }
     } else {
         int factor = (new_size / old_size);
-        if (b0.block % factor != 0) {
+        if (b0.size % factor != 0) {
             gpu_error_not_expected();
             return layout_t();
         }
-        b0.block /= factor;
+        b0.size /= factor;
         // Recompute strides.
         for (auto &b : new_blocks) {
             if (&b == &b0) continue;
@@ -202,13 +259,13 @@ bool try_reinterpret_to_wider_type(layout_t &src, layout_t &dst,
 
     auto &s0 = src[0];
     auto &d0 = dst[0];
-    if (s0.dim != d0.dim) return false;
+    if (s0.idx != d0.idx) return false;
     if (int(s0.stride) != 1) return false;
     if (int(d0.stride) != 1) return false;
 
     int old_size = src.type().size();
-    int s0_old_size = int(s0.block) * old_size;
-    int d0_old_size = int(d0.block) * old_size;
+    int s0_old_size = int(s0.size) * old_size;
+    int d0_old_size = int(d0.size) * old_size;
 
     int new_size = math::gcd(s0_old_size, d0_old_size);
     new_size = math::gcd(new_size, 4); // Try types up to 4 bytes.
@@ -217,7 +274,7 @@ bool try_reinterpret_to_wider_type(layout_t &src, layout_t &dst,
     auto tile_ok = [&](const layout_t &l) {
         if (tile.is_empty()) return true;
         int factor = new_size / old_size;
-        if (tile[l[0].dim] % factor != 0) return false;
+        if (tile[l[0].idx] % factor != 0) return false;
         return true;
     };
 
@@ -246,82 +303,7 @@ bool try_reinterpret_to_wider_type(layout_t &src, layout_t &dst,
     return false;
 }
 
-layout_t layout_t::split_block(
-        const layout_block_t &b, dim_t block0, dim_t block1) const {
-    size_t block_idx = get_idx(b);
-    gpu_assert(b.block == block0 * block1) << "Incompatible block sizes.";
-    MAYBE_UNUSED(b);
-
-    auto new_blocks = blocks_;
-
-    layout_block_t &b0 = new_blocks[block_idx];
-    layout_block_t b1 = b0;
-
-    b0.block = block0;
-    b1.block = block1;
-    b1.stride = b0.stride * block0;
-
-    new_blocks.insert(new_blocks.begin() + block_idx + 1, b1);
-
-    return with(new_blocks, false);
-}
-
-layout_t layout_t::split_into_multi_blocks(
-        const std::vector<dim_t> &multi_blocks) const {
-    if (is_empty()) return *this;
-
-    layout_t tmp(*this);
-    std::vector<dim_t> rem_elems = multi_blocks;
-    std::vector<dim_t> cur_elems(rem_elems.size(), 1);
-    for (auto &b : tmp.blocks()) {
-        for (int i = 0; i < int(rem_elems.size()); i++) {
-            auto &e = rem_elems[i];
-            if (e == 1) continue;
-            if (b.block > e) {
-                // Try to split this block.
-                dim_t next_block = utils::max_div(b.block, e);
-                if (next_block == 1) return layout_t();
-                return tmp.split_block(b, next_block, b.block / next_block)
-                        .split_into_multi_blocks(multi_blocks);
-            }
-            if (e % b.block != 0) return layout_t();
-            e /= b.block;
-            cur_elems[i] *= b.block;
-            break;
-        }
-    }
-    for (int i = 0; i < int(cur_elems.size()); i++) {
-        if (cur_elems[i] != multi_blocks[i]) { return layout_t(); }
-    }
-    return tmp;
-}
-
-tile_t layout_t::split_into_max_tile(
-        dim_t max_tile_elems, bool is_dense_tile) const {
-    stride_t dense_stride = 1;
-    std::vector<dim_t> tile_dims(ndims(), 1);
-    dim_t cur_elems = 1;
-    for (auto &b : blocks()) {
-        if (b.block == 1) continue;
-        if (b.block * cur_elems <= max_tile_elems) {
-            if (is_dense_tile) {
-                if (b.stride.is_unknown()) break;
-                if (dense_stride != b.stride) break;
-                dense_stride = b.block * b.stride;
-            }
-            cur_elems *= b.block;
-            tile_dims[b.dim] *= b.block;
-            continue;
-        }
-        dim_t max_block = utils::max_div(b.block, max_tile_elems / cur_elems);
-        if (max_block == 1) break;
-        auto tmp_layout = split_block(b, max_block, b.block / max_block);
-        return tmp_layout.split_into_max_tile(max_tile_elems, is_dense_tile);
-    }
-    return tile_t(tile_dims);
-}
-
-void layout_t::align_layouts(layout_t &a, layout_t &b) {
+void align_layouts(layout_t &a, layout_t &b) {
     for (auto &d : a.tile()) {
         auto a_blocks = a.blocks();
         auto b_blocks = b.blocks();
@@ -332,46 +314,31 @@ void layout_t::align_layouts(layout_t &a, layout_t &b) {
         int b_idx = 0;
 
         for (;;) {
-            while (a_idx < a_max && a_blocks[a_idx].dim != d)
+            while (a_idx < a_max && a_blocks[a_idx].idx != d)
                 a_idx++;
-            while (b_idx < b_max && b_blocks[b_idx].dim != d)
+            while (b_idx < b_max && b_blocks[b_idx].idx != d)
                 b_idx++;
 
             if (a_idx >= a_max || b_idx >= b_max) break;
 
             auto &ab = a_blocks[a_idx];
             auto &bb = b_blocks[b_idx];
-            dim_t common_block = math::gcd(ab.block, bb.block);
-            if (ab.block == common_block && bb.block == common_block) {
+            dim_t common_size = math::gcd(ab.size, bb.size);
+            if (ab.size == common_size && bb.size == common_size) {
                 a_idx++;
                 b_idx++;
                 continue;
             }
 
-            if (ab.block != common_block) {
-                a = a.split_block(
-                        a[a_idx], common_block, ab.block / common_block);
+            if (ab.size != common_size) {
+                a = a.split_block(a[a_idx], common_size, ab.size / common_size);
             }
-            if (bb.block != common_block) {
-                b = b.split_block(
-                        b[b_idx], common_block, bb.block / common_block);
+            if (bb.size != common_size) {
+                b = b.split_block(b[b_idx], common_size, bb.size / common_size);
             }
             break;
         }
     }
-}
-
-void layout_t::sanity_check() const {
-#if !defined(NDEBUG) || defined(DNNL_DEV_MODE)
-    return;
-#endif
-    if (is_empty()) return;
-
-    for (auto &b : blocks_) {
-        gpu_assert(b.block > 0) << "Incorrect block size.";
-        MAYBE_UNUSED(b);
-    }
-    if (with_ndims()) gpu_assert(ndims() <= max_ndims);
 }
 
 expr_t grid_splitter_t::pop_block(dim_t size) {
@@ -453,9 +420,9 @@ layout_t view_t::create_pseudo_vlayout(
 
     for (auto &tb : tlayout.blocks()) {
         bool tb_is_outermost = tlayout.is_outermost(tb);
-        dim_t tblock = tb.block;
+        dim_t tsize = tb.size;
 
-        auto &tinfo = tdims_[tb.dim];
+        auto &tinfo = tdims_[tb.idx];
         if (tb_is_outermost) {
             // Use innermost dimension with maximum remaining size for first
             // block
@@ -495,20 +462,20 @@ layout_t view_t::create_pseudo_vlayout(
         dim_t &rem_vdim = rem_vdims[vidx];
         if (rem_vdim == 1) continue;
 
-        if (rem_vdim % tblock == 0) {
-            rem_vdim /= tblock;
-        } else if (rem_vdim % tblock != 0) {
+        if (rem_vdim % tsize == 0) {
+            rem_vdim /= tsize;
+        } else if (rem_vdim % tsize != 0) {
             // Try to split the current block and start from scratch.
-            if (tblock % rem_vdim == 0) {
+            if (tsize % rem_vdim == 0) {
                 auto tmp_layout
-                        = tlayout.split_block(tb, rem_vdim, tblock / rem_vdim);
+                        = tlayout.split_block(tb, rem_vdim, tsize / rem_vdim);
                 return create_pseudo_vlayout(tmp_layout, init_offset);
             }
 
             // TODO: Remove exception usage.
             gpu_except_not_implemented("Can't create pseudo-layout.");
         }
-        blocks.emplace_back(tb.dim, tblock, tb.stride);
+        blocks.emplace_back(tb.idx, tsize, tb.stride);
     }
 
     for (auto &d : rem_vdims) {
@@ -526,10 +493,10 @@ layout_t view_t::create_pseudo_vlayout(
 layout_t dim_assignment_t::map(const layout_t &layout) const {
     std::vector<layout_block_t> new_blocks;
     for (auto &b : layout.blocks()) {
-        int new_idx = assignments_[b.dim];
-        if (new_idx == -1) continue; // Drop this block.
+        size_t new_idx = assignments_[b.idx];
+        if (new_idx == dim_idx::invalid) continue; // Drop this block.
         auto new_b = b;
-        new_b.dim = new_idx;
+        new_b.idx = new_idx;
         new_blocks.push_back(new_b);
     }
     new_blocks = normalize_blocks(new_blocks,
@@ -543,19 +510,19 @@ layout_t dim_assignment_t::map(const layout_t &layout) const {
 
 layout_t spatials_to_3d(const layout_t &layout, bool with_groups,
         const std::array<int, 3> &dhw_map) {
-    const int old_ndims = layout.ndims();
-    const int old_sp_ndims = old_ndims - (with_groups ? 3 : 2);
-    const int new_ndims = old_ndims - old_sp_ndims + 3;
+    const size_t old_ndims = layout.ndims();
+    const size_t old_sp_ndims = old_ndims - (with_groups ? 3 : 2);
+    const size_t new_ndims = old_ndims - old_sp_ndims + 3;
 
     dim_assignment_t to_3d(old_ndims, new_ndims);
-    for (int i = 0; i < old_ndims; i++) {
+    for (size_t i = 0; i < old_ndims; i++) {
         if (i < old_ndims - old_sp_ndims) {
             // Non-spatial dimensions.
             to_3d.assign(i, i);
         } else {
             // Spatial dimensions.
-            int old_sp_idx = 3 - (old_ndims - i);
-            int new_sp_idx = dhw_map[old_sp_idx];
+            size_t old_sp_idx = 3 - (old_ndims - i);
+            size_t new_sp_idx = dhw_map[old_sp_idx];
             to_3d.assign(i, new_ndims - (3 - new_sp_idx));
         }
     }

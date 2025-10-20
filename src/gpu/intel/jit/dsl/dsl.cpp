@@ -33,7 +33,7 @@ namespace dsl {
 struct ctx_t {
     bool new_ir_api() const { return new_ir_api_; }
 
-    void declare_kernel(const kernel_iface_t &interface, ir_context_t &ctx,
+    void declare_kernel(const kernel::iface_t &interface, ir_context_t &ctx,
             bool new_ir_api = false) {
         slm_byte_offset_ = 0;
         new_ir_api_ = new_ir_api;
@@ -58,8 +58,8 @@ struct ctx_t {
             subgroup_local_id_
                     = def("subgroup_local_id", local_ids_[0] & (simd() - 1));
         } else {
-            for (int i = 0; i < interface.nargs(); i++) {
-                const auto &var = interface.arg_var(i);
+            for (size_t i = 0; i < interface.nargs(); i++) {
+                const auto &var = interface[i];
                 if (var.type().is_ptr()) {
                     if (var.type().is_slm()) {
                         append(alloc_t::make(
@@ -93,13 +93,13 @@ struct ctx_t {
             auto slm_alloc = builtin_t::make("alloc")(slm_buf);
             body = slm_alloc.append(body);
         }
-        kernel_t ret {std::move(interface_), body, ctx_->exec_cfg()};
+        kernel_t ret {std::move(interface_), body, ctx_->options()};
         ctx_ = nullptr;
         interface_ = {"undefined_dsl_kernel"};
         return ret;
     }
 
-    int simd() const { return ctx_->exec_cfg().simd(); }
+    int simd() const { return ctx_->options().simd(); }
 
     const std::array<expr_t, 3> &group_ids() const { return group_ids_; }
     const expr_t &group_id(int idx) const { return group_ids_[idx]; }
@@ -122,16 +122,16 @@ struct ctx_t {
             bool force_alloc = false) {
         auto type = _type.with_attr(_type.attr() | type::attr_t::mut);
         auto alloc_var = var(type, name);
-        if (force_alloc || type.is_ptr()) {
-            append(alloc_t::make(alloc_var, {}));
-
-            if (!value.is_empty()) {
-                gpu_assert(to_cpp<int>(value) == 0);
-                append(funcs::zero_out(alloc_var, type.size()));
-            }
+        if (new_ir_api_) {
+            if (!value.is_empty()) append(assign_t::make(alloc_var, value));
         } else {
-            if (new_ir_api_) {
-                if (!value.is_empty()) append(assign_t::make(alloc_var, value));
+            if (force_alloc || type.is_ptr()) {
+                append(alloc_t::make(alloc_var, {}));
+
+                if (!value.is_empty()) {
+                    gpu_assert(to_cpp<int>(value) == 0);
+                    append(funcs::zero_out(alloc_var, type.size()));
+                }
             } else {
                 append(let_t::make(alloc_var, value, {}));
             }
@@ -245,7 +245,7 @@ private:
 
     std::vector<stmt_t> &stmts() { return stmts_stack_.top(); }
     std::stack<std::vector<stmt_t>> stmts_stack_;
-    kernel_iface_t interface_ = {"undefined_dsl_kernel"};
+    kernel::iface_t interface_ = {"undefined_dsl_kernel"};
     ir_context_t *ctx_ = nullptr;
     std::array<expr_t, 3> group_ids_;
     std::array<expr_t, 3> local_ids_;
@@ -265,14 +265,14 @@ int grf_size() {
     return default_ctx().ir_ctx()->hw().grf_size();
 }
 int min_align_2d() {
-    return block_2d_base_alignment(default_ctx().ir_ctx()->hw().to_ngen());
+    return block_2d_base_alignment(default_ctx().ir_ctx()->hw());
 }
 int min_pitch_2d() {
-    return block_2d_pitch_alignment(default_ctx().ir_ctx()->hw().to_ngen());
+    return block_2d_pitch_alignment(default_ctx().ir_ctx()->hw());
 }
 
 void declare_kernel(
-        const kernel_iface_t &interface, ir_context_t &ctx, bool new_ir_api) {
+        const kernel::iface_t &interface, ir_context_t &ctx, bool new_ir_api) {
     default_ctx().declare_kernel(interface, ctx, new_ir_api);
 }
 
@@ -376,9 +376,16 @@ expr_t extract(const expr_t &expr, int lane) {
     return shuffle_t::make(expr, {lane});
 }
 
+lval_t::lval_t(const type_t &type, const std::string &name)
+    : var(var_t::make(type, name)) {}
+
 lval_t &lval_t::operator=(const expr_t &obj) {
     assign(this->var, obj);
     return *this;
+}
+
+lval_t lval_t::sub(int off, int elems) const {
+    return lval_t(ref_t::make(var, off, elems));
 }
 
 expr_t let(const std::string &name, const type_t &type, const expr_t &value) {
@@ -414,8 +421,8 @@ void block_send(const tensor_t &t, const global_tensor_t &g,
     for (auto &var : operation_tile) {
         if (is_const(g.strides[var]) && to_cpp<dim_t>(g.strides[var]) == 1
                 && t.layout.elems() != 1) {
-            tile[var] = t.layout[0].block;
-            gpu_assert(t.layout[0].dim == var);
+            tile[var] = t.layout[0].size;
+            gpu_assert(t.layout[0].idx == var);
             w_idx = var;
         } else {
             tile[var] = 1;
@@ -553,9 +560,9 @@ void send(const tensor_t &t, const global_tensor_t &g, send_kind_t op_kind,
         auto conf = [&]() -> conf_2d_t {
             if (is_prefetch) { return {g.type, w_idx, 0, false, false, false}; }
             auto &l = t.layout;
-            int pack_idx = l[0].block * l.type().size() == 4;
-            int pack_size = into<int>(l[pack_idx].block);
-            bool is_transpose_vnni = l[pack_idx].dim != w_idx;
+            int pack_idx = l[0].size * l.type().size() == 4;
+            int pack_size = into<int>(l[pack_idx].size);
+            bool is_transpose_vnni = l[pack_idx].idx != w_idx;
             bool is_vnni = pack_idx == 1 && !is_transpose_vnni;
             bool is_store = op_kind == send_kind_t::store;
             return {g.type, w_idx, pack_size, is_vnni, is_transpose_vnni,
@@ -568,7 +575,7 @@ void send(const tensor_t &t, const global_tensor_t &g, send_kind_t op_kind,
         }
     }
 
-    if (is_prefetch || t.layout.elems() == 1 || t.layout[0].dim == w_idx) {
+    if (is_prefetch || t.layout.elems() == 1 || t.layout[0].idx == w_idx) {
         block_send(t, g, op_kind, base, hint);
     } else {
         scatter_send(t, g, op_kind, base, hint);
@@ -597,25 +604,25 @@ void mma(const tensor_t &C, const tensor_t &A, const tensor_t &B,
         int64_t sdepth = 8;
         int64_t max_rcount = 8;
 
-        auto simd_idx = C.layout[0].dim;
-        auto sdepth_idx = A.layout[0].dim == C.layout[0].dim ? A.layout[1].dim
-                                                             : A.layout[0].dim;
-        auto rcount_dim = C.layout[1].dim;
+        auto simd_idx = C.layout[0].idx;
+        auto sdepth_idx = A.layout[0].idx == C.layout[0].idx ? A.layout[1].idx
+                                                             : A.layout[0].idx;
+        auto rcount_idx = C.layout[1].idx;
         auto sdepth_pack = 4 / A.layout.type().size();
 
         tile_t inst_tile {{simd_idx, simd}, {sdepth_idx, sdepth * sdepth_pack},
-                {rcount_dim, max_rcount}};
+                {rcount_idx, max_rcount}};
 
         gpu_assert(tile[simd_idx] % simd == 0);
         gpu_assert(tile[sdepth_idx] % (sdepth_pack * sdepth) == 0);
-        gpu_assert(C.layout[0].block == simd);
+        gpu_assert(C.layout[0].size == simd);
         std::vector<stmt_t> dpas_stmts;
 
         v2::for_each(tile, inst_tile, [&](const icoord_t &coord) {
             int simd = (int)inst_tile[simd_idx];
             auto sdepth = inst_tile[sdepth_idx] / sdepth_pack;
-            auto rcount = std::min(inst_tile[rcount_dim],
-                    tile[rcount_dim] - coord[rcount_dim]);
+            auto rcount = std::min(inst_tile[rcount_idx],
+                    tile[rcount_idx] - coord[rcount_idx]);
 
             auto dpas = dpas_t::make(false, simd, into<uint8_t>(sdepth),
                     into<uint8_t>(rcount), C.layout.type(), B.layout.type(),
@@ -638,13 +645,13 @@ void mma(const tensor_t &C, const tensor_t &A, const tensor_t &B,
     } else {
         auto max_simd = 32;
 
-        const auto &simd_idx = C.layout[0].dim;
-        const auto &rcount_idx = C.layout[1].dim;
+        const auto &simd_idx = C.layout[0].idx;
+        const auto &rcount_idx = C.layout[1].idx;
         const auto &m_idx = simd_idx;
         const auto &n_idx = rcount_idx;
-        const auto &k_idx = utils::one_of(A.layout[1].dim, simd_idx, rcount_idx)
-                ? A.layout[0].dim
-                : A.layout[1].dim;
+        const auto &k_idx = utils::one_of(A.layout[1].idx, simd_idx, rcount_idx)
+                ? A.layout[0].idx
+                : A.layout[1].idx;
 
         tile_t inst_tile {{{simd_idx, max_simd}, {rcount_idx, 1}, {k_idx, 1}}};
 
@@ -653,8 +660,8 @@ void mma(const tensor_t &C, const tensor_t &A, const tensor_t &B,
         int K = (int)inst_tile.get(k_idx, 1);
         bool is_a_bcast = (M * K == 1);
         bool is_b_bcast = (K * N == 1);
-        int a_stride = is_a_bcast ? 0 : into<int>(A.layout.stride(m_idx));
-        int b_stride = is_b_bcast ? 0 : into<int>(B.layout.stride(n_idx));
+        int a_stride = is_a_bcast ? 0 : int(A.layout.stride(m_idx));
+        int b_stride = is_b_bcast ? 0 : int(B.layout.stride(n_idx));
 
         gpu_assert(tile[simd_idx] * C.layout.type().size() % grf_size() == 0);
         v2::for_each(tile, inst_tile, [&](const icoord_t &coord) {
@@ -674,6 +681,21 @@ void mma(const tensor_t &C, const tensor_t &A, const tensor_t &B,
     }
 }
 
+void _if_impl(const expr_t &cond, const stmt_t &if_body) {
+    append(if_t::make(cond, if_body));
+}
+void _if_impl(
+        const expr_t &cond, const stmt_t &if_body, const stmt_t &else_body) {
+    append(if_t::make(cond, if_body, else_body));
+}
+void _for_impl(const expr_t &var, const expr_t &bound, const expr_t &step,
+        const stmt_t &body) {
+    append(for_t::make(var, 0, bound, body, step));
+}
+void _while_impl(const expr_t &cond, const stmt_t &body) {
+    append(while_t::make(cond, body));
+}
+
 void binary(op_kind_t op, const tensor_t &dst, const tensor_t &src0,
         const tensor_t &src1) {
     tile_t tile = dst.layout.tile();
@@ -690,7 +712,7 @@ void binary(op_kind_t op, const tensor_t &dst, const tensor_t &src0,
             if (b0.size() <= i) break;
             if (b1.size() <= i) break;
             if (bd[i] == b0[i] && bd[i] == b1[i])
-                ret[bd[i].dim] *= bd[i].block;
+                ret[bd[i].idx] *= bd[i].size;
             else
                 break;
         }

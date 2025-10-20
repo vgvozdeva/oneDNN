@@ -127,8 +127,13 @@ status_t micro_t::pd_t::init_conf_microkernels(impl::engine_t *engine) {
             && !is_f32; // f32 -> non-systolic kernel only
 
     bool use_fma_config = !use_systolic_ukernel_;
+    bool is_f16_accumulate_gemm = (kq_acc_dt() == data_type::f16)
+            || (vs_acc_dt() == data_type::f16);
+    VCHECK_SDPA_COND(
+            IMPLICATION(is_f16_accumulate_gemm, !use_systolic_ukernel_),
+            "f16 accumulate only available with FMA matmul."); //TODO: update once matmul primitive supports systolic f16 accumulate for testing
     config = choose_config(arch_, d->head_size(), d->keys(), thin_q, quantized,
-            is_integrated, use_fma_config, is_f32);
+            is_integrated, use_fma_config, is_f32, is_f16_accumulate_gemm);
 
     VCHECK_SDPA_COND(config != nullptr,
             "No suitable kernel configuration found for the given problem "
@@ -218,12 +223,6 @@ status_t micro_t::pd_t::init_conf_microkernels(impl::engine_t *engine) {
     problem.Ts = problem.Tc;
 
     auto problem_kq = problem;
-
-    bool is_f16_accumulate_gemm = (kq_acc_dt() == data_type::f16)
-            || (vs_acc_dt() == data_type::f16);
-    VCHECK_SDPA_COND(
-            IMPLICATION(is_f16_accumulate_gemm, !use_systolic_ukernel_),
-            "f16 accumulate only available with FMA matmul."); //TODO: update once matmul primitive supports systolic f16 accumulate for testing
     problem_kq.Tc = problem_kq.Ts
             = (kq_acc_dt() == data_type::f16) ? Type::f16 : Type::f32;
 
@@ -282,9 +281,9 @@ status_t micro_t::pd_t::init_conf_microkernels(impl::engine_t *engine) {
     SizeParams heuristic_sizes;
     // quanatizing sizes to large intervals allows kernel
     // selection search while avoiding recompilation for every new size
-    heuristic_sizes.m
-            = nearest_conf_seq_interval(arch_, d->head_size(), d->keys(),
-                    thin_q, quantized, is_integrated, use_fma_config, is_f32);
+    heuristic_sizes.m = nearest_conf_seq_interval(arch_, d->head_size(),
+            d->keys(), thin_q, quantized, is_integrated, use_fma_config, is_f32,
+            is_f16_accumulate_gemm);
     // query size is only tuned to thin_q/non-thin_q cases
     heuristic_sizes.n = (queries <= thin_q_threshold)
             ? thin_q_threshold
@@ -762,8 +761,10 @@ status_t micro_t::execute(const exec_ctx_t &ctx) const {
     if (pd()->with_host_scale()) {
         auto scalar_storage = utils::downcast<
                 const dnnl::impl::host_scalar_memory_storage_t *>(&scale);
-        scalar_storage->get_scalar_value(
+        auto status = scalar_storage->get_scalar_value(
                 &scalar_scale, scale_mdw.data_type_size());
+        assert(status == status::success);
+        if (status != status::success) return status;
         scalar_scale = dnnl::impl::cpu::io::load_float_value(
                 pd()->scale_md()->data_type, &scalar_scale, 0);
         inv_scalar_scale = 1. / scalar_scale;

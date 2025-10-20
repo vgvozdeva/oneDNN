@@ -133,15 +133,15 @@ private:
 
 stmt_t builder_t::try_build(builder_t &pb, const kernel_info_t &ki,
         const config_t &cfg, const primitive_desc_t &pd) {
-    const auto &exec = cfg.exec_cfg();
+    const auto &exec = cfg.options();
     const auto &prb = cfg.problem();
     const auto &src_layout = cfg.src_layout().user();
     const auto &dst_layout = cfg.dst_layout().user();
 
     const bool is_xe2_or_xe3_small_kdhw = !(prb.kd * prb.kh * prb.kw == 1)
             && (prb.kh * prb.kw <= 9)
-            && (exec.hw().to_ngen() == ngen::HW::Xe2
-                    || exec.hw().to_ngen() == ngen::HW::Xe3);
+            && (exec.hw().ngen_hw() == ngen::HW::Xe2
+                    || exec.hw().ngen_hw() == ngen::HW::Xe3);
 
     gpu_assert(src_layout.ndims() == dst_layout.ndims());
 
@@ -399,8 +399,8 @@ stmt_t builder_t::try_build(builder_t &pb, const kernel_info_t &ki,
     const auto &write_layout = write.reg_layout();
     auto write_stmt = write.stmt();
 
-    tile_t src_tile(read_layout.split_into_max_tile(simd, true));
-    tile_t dst_tile(write_layout.split_into_max_tile(simd, true));
+    tile_t src_tile(read_layout.max_subtile(simd));
+    tile_t dst_tile(write_layout.max_subtile(simd));
     gpu_assert(src_tile.elems() == simd);
     gpu_assert(dst_tile.elems() == simd);
 
@@ -433,13 +433,13 @@ stmt_t builder_t::try_build(builder_t &pb, const kernel_info_t &ki,
                                 const tile_t &tile, const layout_t &layout) {
         stmt_t retn;
         const auto values = gen_fill_values(simd, isneg, layout.type());
-        layout.for_each_tile(tile, [&](const icoord_t &s) {
+        for (auto &s : layout.iter(tile)) {
             const dim_t off = layout.offset<dim_t>(s) * layout.type().size();
             if (off >= utils::rnd_dn(size_bytes(layout), simd * 4))
                 retn = retn.append(store_t::make(buf, off, values.first));
             else if (off % (simd * 4) == 0)
                 retn = retn.append(store_t::make(buf, off, values.second));
-        });
+        }
         return retn;
     };
     const bool is_neg
@@ -468,7 +468,7 @@ stmt_t builder_t::try_build(builder_t &pb, const kernel_info_t &ki,
                     (acc_size - i < simd * 4) ? a_fv.first : a_fv.second));
         fill_stmt = gen_zero_out(simd, is_neg, read_buf, src_tile, read_layout);
 
-        read_layout.for_each_tile(src_tile, [&](const icoord_t &s) {
+        for (auto &s : read_layout.iter(src_tile)) {
             const dim_t off_l
                     = read_layout.offset<dim_t>(s) * read_layout.type().size();
             const dim_t off_a = (s.get(0) * lg[1] + s.get(1)) * acc_sc_size;
@@ -480,7 +480,7 @@ stmt_t builder_t::try_build(builder_t &pb, const kernel_info_t &ki,
             auto op = binary_op_t::make(op_kind, acc, load);
             compute_stmt
                     = compute_stmt.append(store_t::make(acc_buf, off_a, op));
-        });
+        }
 
         stmt = stmt.append(schedule.create_loop_nest((check_idhw)
                         ? fill_stmt.append(compute_stmt)
