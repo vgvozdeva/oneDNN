@@ -121,8 +121,13 @@ jobs:
   pr-security-scan:
     name: Security Scanning
     runs-on: ["innersource.prod.amr.dind"]
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: CAS Security Orchestrator
       - uses: intel-innersource/applications.security.monitoring.cas@v2
         with:
           sdl-api-key: ${{ secrets.1951f63a-bf40-40e4-a547-5094d415f847 }}
