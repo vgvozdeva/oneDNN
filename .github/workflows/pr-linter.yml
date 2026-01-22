@@ -120,18 +120,13 @@ jobs:
 
   pr-security-scan:
     name: Security Scanning
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      pull-requests: write
+    runs-on: ["innersource.prod.amr.dind"]
     steps:
       - uses: actions/checkout@v4
-
-      - name: CAS Security Orchestrator
       - uses: intel-innersource/applications.security.monitoring.cas@v2
         with:
-          sdl-api-key: ${{ 1951f63a-bf40-40e4-a547-5094d415f847 }}
-          sdl-project-id: ${{ e805d7f0-10e2-4b6e-9dc1-87ee95086fe0 }}
+          sdl-api-key: ${{ secrets.SDL_API_KEY }}
+          sdl-project-id: ${{ secrets.SDL_PROJECT_ID }}
 
   pr-status:
     name: Formatting
