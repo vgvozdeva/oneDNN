@@ -102,8 +102,8 @@ struct jit_uni_softmax_fwd_t : public primitive_t {
 
     private:
         void init_scratchpad() {
-            if (utils::one_of(
-                        dst_md()->data_type, data_type::u8, data_type::s8)) {
+            if (utils::one_of(dst_md()->data_type, data_type::u8, data_type::s8,
+                        data_type::bf16)) {
                 auto scratchpad = scratchpad_registry().registrar();
                 scratchpad.template book<char>(
                         memory_tracking::names::key_softmax_interim_store,

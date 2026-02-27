@@ -289,8 +289,9 @@ jit_softmax_base_t::jit_softmax_base_t(const softmax_pd_t *pd, int vlen)
     , src_d_(pd_->is_fwd() ? pd_->src_md() : pd_->diff_src_md())
     , dst_d_(pd_->dst_md())
     , diff_dst_d_(pd_->diff_dst_md())
-    , need_scratchpad_(
-              utils::one_of(dst_d_.data_type(), data_type::u8, data_type::s8))
+    , need_scratchpad_(pd_->is_fwd()
+              && utils::one_of(dst_d_.data_type(), data_type::u8, data_type::s8,
+                      data_type::bf16))
     , vlen_(vlen)
     , simd_w_(vlen / sizeof(float)) // bf16 works on ymms
 {}
@@ -374,7 +375,6 @@ XReg jit_softmax_sve_t::diff_dst_ptr(size_t offt) {
 
 void jit_softmax_sve_t::store(
         const XReg &addr, const ZReg &vmm, data_type_t dt, bool tail) {
-    ZReg bf16_cvt_ymm = ZReg(24);
     PReg opmask = P_ALL_ONE;
     bool tail_mask_valid = false;
     auto effective_addr = addr;
@@ -403,8 +403,8 @@ void jit_softmax_sve_t::store(
             st1w(src_vmm.s, opmask, ptr(effective_addr));
             break;
         case data_type::bf16:
-            bfcvt(bf16_cvt_ymm.h, P_ALL_ONE / T_z, src_vmm.s);
-            st1h(bf16_cvt_ymm.s, opmask, ptr(effective_addr));
+            bfcvt(src_vmm.h, P_ALL_ONE / T_m, src_vmm.s);
+            st1h(src_vmm.s, opmask, ptr(effective_addr));
             break;
         case data_type::u8:
             eor(vzero.d, vzero.d, vzero.d); // since vzero might be spoiled
