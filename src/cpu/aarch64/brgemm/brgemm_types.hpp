@@ -359,6 +359,7 @@ struct brgemm_kernel_params_t {
 };
 
 struct jit_brgemm_kernel_t;
+struct jit_brgemm_sme_kernel_base_t;
 struct jit_brdgmm_kernel_base_t;
 class jit_generator_t;
 
@@ -382,6 +383,20 @@ private:
     jit_brgemm_kernel_t *brgemm_kernel_ = nullptr;
 
     DNNL_DISALLOW_COPY_AND_ASSIGN(brgemm_kernel_common_t);
+};
+
+struct brgemm_sme_kernel_t : public brgemm_kernel_t {
+    brgemm_sme_kernel_t(const brgemm_desc_t abrd);
+    ~brgemm_sme_kernel_t() override;
+
+    status_t create_kernel() override;
+    void operator()(brgemm_kernel_params_t *) const override;
+    const jit_generator_t *get_jit_generator() const override;
+
+private:
+    jit_brgemm_sme_kernel_base_t *brgemm_kernel_ = nullptr;
+
+    DNNL_DISALLOW_COPY_AND_ASSIGN(brgemm_sme_kernel_t);
 };
 
 struct brdgmm_kernel_t : public brgemm_kernel_t {

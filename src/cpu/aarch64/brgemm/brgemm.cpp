@@ -223,6 +223,13 @@ status_t brgemm_desc_set_postops(brgemm_desc_t *brg,
     brg->attr = attr;
     brg->dst_md = dst_md;
 
+    if ((sme == brg->isa_impl)
+            && ((data_type::undef != dt_bias) || attr->post_ops_.len()
+                    || !attr->scales_.get(DNNL_ARG_SRC).has_default_values()
+                    || !attr->scales_.get(DNNL_ARG_WEIGHTS).has_default_values()
+                    || !attr->scales_.get(DNNL_ARG_DST).has_default_values()))
+        return status::unimplemented;
+
     brg->with_bias = (dt_bias == data_type::undef) ? false : true;
     brg->dt_bias = dt_bias;
     brg->typesize_bias = (dt_bias == data_type::undef)
@@ -446,6 +453,9 @@ status_t brgemm_kernel_create(
     if (brg.is_dgmm) {
         CHECK(safe_ptr_assign<brgemm_kernel_t>(
                 *brg_kernel, new brdgmm_kernel_t(brg)));
+    } else if (sme == brg.isa_impl) {
+        CHECK(safe_ptr_assign<brgemm_kernel_t>(
+                *brg_kernel, new brgemm_sme_kernel_t(brg)));
     } else {
         CHECK(safe_ptr_assign<brgemm_kernel_t>(
                 *brg_kernel, new brgemm_kernel_common_t(brg)));
