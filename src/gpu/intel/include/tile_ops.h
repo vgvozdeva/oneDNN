@@ -1168,7 +1168,7 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
         _Pragma("unroll") for (int jj = 0; jj < nbc; jj++, ptr += ld * bc) { \
             _Pragma("unroll") for (int ii = 0; ii < nbr; ii++)(t) \
                     ->x[ii + nbr * jj] \
-                    = block_load(ptr + ii * br, br / SUBGROUP_SIZE); \
+                    = block_load(ptr + ii * br, br / sg); \
         } \
     } \
     __attribute__((overloadable)) void tile_store_block(tile_type t, \
@@ -1202,7 +1202,7 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
             if (jj < n) { \
                 _Pragma("unroll") for (int ii = 0; ii < nbr; ii++)(t) \
                         ->x[ii + nbr * jj] \
-                        = block_load(ptr + ii * br, br / SUBGROUP_SIZE); \
+                        = block_load(ptr + ii * br, br / sg); \
             } \
         } \
     } \
