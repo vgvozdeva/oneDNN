@@ -134,7 +134,7 @@ jobs:
         
     - name: "Run codespell"
       run: |
-        codespell *.md doc -L COO,coo,nD,ND
+        codespell *.* doc -L COO,coo,nD,ND
 
   other-lint:
     name: Other linters
