@@ -89,7 +89,7 @@ Requirements:
   * Track record of major project contributions to a specific project component.
   * Demonstrated deep knowledge of a specific project component.
   * Demonstrated broad knowledge of the project across multiple areas.
-  * Commits to using priviledges responsibly for the good of the project.
+  * Commits to using privileges responsibly for the good of the project.
   * Is able to exercise judgment for the good of the project, independent of
     their employer, friends, or team.
 
