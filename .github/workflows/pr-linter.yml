@@ -156,7 +156,7 @@ jobs:
   pr-status:
     name: Formatting
     runs-on: ubuntu-24.04
-    needs: [ pr-commits, pr-clang-format, pr-format-tags, pr-check-license-header, Codespell Check]
+    needs: [ pr-commits, pr-clang-format, pr-format-tags, pr-check-license-header, pr-check-codespell]
     steps:
       - name: Print success
         run: echo "Success"
