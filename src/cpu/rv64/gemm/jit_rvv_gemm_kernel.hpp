@@ -25,24 +25,31 @@ namespace cpu {
 namespace rv64 {
 namespace gemm_utils {
 
-// RVV JIT micro-kernel for f32 GEMM on RV64, implementing the same tile shape
-// as rvv_gemm_f32::kernel_mxn for the most important case:
-//   - isTransA = false
-//   - isTransB = false
+// RVV JIT micro-kernel for f32 GEMM on RV64.
 //
-// It computes a single mx4 block (m = 8 or 16 rows, n = 4 columns) of:
+// Computes an m x n_cols tile of:
+//   C[0:m, 0:n_cols] = alpha * A[0:m, 0:K] * B[0:K, 0:n_cols]
+//                    + beta * C[0:m, 0:n_cols]
 //
-//   C[0:m, 0:4] = alpha * A[0:m, 0:K] * B[0:K, 0:4] + beta * C[0:m, 0:4]
+// Design choices:
+//   - LMUL is fixed to m4 (4 vector registers per group)
+//   - n_cols is fixed at JIT compile time (1..7), determining the number
+//     of accumulator register groups emitted
+//   - m (tile height) is a runtime parameter; the JIT code uses vsetvli
+//     to set VL accordingly, so any m <= VLEN/32*4 is supported
+//   - isTransA/isTransB determine A/B memory access patterns
 //
-// using RVV vectorization over the M dimension and a 4-way unrolled K-loop
-// with a software-pipelined load/FMA schedule to better hide vector/FMA
-// latency.
+// Vector register layout (LMUL=m4, 8 groups of 4 regs):
+//   v0..v3   : accumulator c0 (column 0)
+//   v4..v7   : accumulator c1 (column 1)
+//   v8..v11  : accumulator c2 (column 2)
+//   v12..v15 : accumulator c3 (column 3)
+//   v16..v19 : accumulator c4 (column 4)
+//   v20..v23 : accumulator c5 (column 5)
+//   v24..v27 : accumulator c6 (column 6)
+//   v28..v31 : temporary for A loads and C update
 //
-// When m=8: uses LMUL=m2 for vector registers
-// When m=16: uses LMUL=m4 for vector registers
-//
-// The m parameter is provided at construction time, and the JIT code is
-// generated specifically for that m value (not as a runtime parameter).
+// When n_cols < 7, only the first n_cols accumulator groups are used.
 struct jit_rvv_gemm_kernel_t : public jit_generator_t {
     struct call_params_t {
         const float *A;
@@ -52,14 +59,15 @@ struct jit_rvv_gemm_kernel_t : public jit_generator_t {
         dim_t ldb;
         dim_t ldc;
         dim_t K;
+        dim_t m;
         float alpha;
         float beta;
     };
 
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_rvv_gemm_kernel_t)
 
-    // Construct a JIT kernel for a specific m value (8 or 16)
-    jit_rvv_gemm_kernel_t(dim_t m);
+    // Construct a JIT kernel for a specific n_cols (1..7) and transpose modes
+    jit_rvv_gemm_kernel_t(dim_t n_cols, bool isTransA, bool isTransB);
 
     void operator()(const call_params_t *p) const {
         jit_generator_t::operator()(p);
@@ -69,7 +77,9 @@ protected:
     void generate() override;
 
 private:
-    dim_t m_; // tile size in M dimension (8 or 16)
+    dim_t n_cols_;
+    bool isTransA_;
+    bool isTransB_;
 };
 
 } // namespace gemm_utils

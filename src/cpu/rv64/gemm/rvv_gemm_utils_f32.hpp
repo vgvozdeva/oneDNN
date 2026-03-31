@@ -21,7 +21,8 @@
 #include "common/c_types_map.hpp"
 
 #include <cstddef>
-#include <unistd.h>
+
+#include "xbyak_riscv/xbyak_riscv_util.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -34,7 +35,7 @@ struct gemm_traits_t {};
 
 template <bool isTransA, bool isTransB>
 struct gemm_traits_t<float, isTransA, isTransB> {
-    static constexpr dim_t m = 16;
+    // m is determined by VLEN at runtime via get_m_unroll_factor()
     static constexpr dim_t BM = 4032;
     static constexpr dim_t BN = isTransA ? 96 : 256;
     static constexpr dim_t BK = isTransB ? 96 : 256;
@@ -45,28 +46,18 @@ struct gemm_utils_traits;
 
 template <>
 struct gemm_utils_traits<float> {
-    static constexpr dim_t get_m_unroll_factor() {
-        return gemm_traits_t<float, false, false>::m;
+    // m = VLEN / 32 * LMUL, where LMUL = 4 for f32
+    // VLEN=128 -> m=16, VLEN=256 -> m=32, VLEN=512 -> m=64
+    static dim_t get_m_unroll_factor() {
+        static const dim_t m = []() -> dim_t {
+            const uint32_t vlen = Xbyak_riscv::CPU::getInstance().getVlen();
+            return static_cast<dim_t>(vlen / 32 * 4);
+        }();
+        return m;
     }
 
-    static dim_t get_n_unroll_factor() {
-        long l1d_size = get_l1d_cache_size();
-        if (l1d_size >= 128 * 1024)
-            return 16;
-        else if (l1d_size >= 64 * 1024)
-            return 8;
-        else if (l1d_size >= 32 * 1024)
-            return 4;
-        else
-            return 2;
-    }
-
-private:
-    static long get_l1d_cache_size() {
-        static long l1d_size = sysconf(_SC_LEVEL1_DCACHE_SIZE);
-        if (l1d_size == -1) { l1d_size = 32 * 1024; }
-        return l1d_size;
-    }
+    // Fixed n = 7 for the mx7 micro-kernel
+    static constexpr dim_t get_n_unroll_factor() { return 7; }
 };
 
 // Sum the m*n values from p_src into p_dst, assuming the two-dimensional
@@ -88,12 +79,12 @@ void calc_nthr_nocopy_rvv(dim_t m, dim_t n, dim_t k, int nthrs, int *nthrs_m,
 void partition_unit_diff(
         int ithr, int nthr, dim_t n, dim_t *t_offset, dim_t *t_block);
 
-// RVV JIT micro-kernel used from rvv_gemm_f32.cpp to replace the hand-written
-// RVV intrinsics implementation of the 8x4 or 16x4 micro-kernel when
-//   isTransA = false, isTransB = false, n_unroll = 4.
-// The m parameter must be either 8 or 16.
+// RVV JIT micro-kernel for f32 GEMM.
+// Computes an m x n tile of C = alpha * A * B + beta * C.
+// n_cols must be 1..7, m can be any value (handled by vsetvl).
 void jit_rvv_gemm_kernel(const float *A, const float *B, float *C, dim_t lda,
-        dim_t ldb, dim_t ldc, dim_t K, float alpha, float beta, dim_t m);
+        dim_t ldb, dim_t ldc, dim_t K, float alpha, float beta, dim_t m,
+        dim_t n_cols, bool isTransA, bool isTransB);
 
 } // namespace gemm_utils
 } // namespace rv64
