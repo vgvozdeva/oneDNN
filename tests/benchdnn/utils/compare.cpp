@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <cmath>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <thread>
 
@@ -260,6 +259,7 @@ int compare_t::compare_p2p(const dnn_mem_t &exp_mem, const dnn_mem_t &got_mem,
             dnnl_f16, dnnl_e8m0, dnnl_f8_e5m2, dnnl_f8_e4m3};
     const bool output_has_nans = op_output_has_nans_
             || eltwise::eltwise_alg_returns_nan_or_inf(attr)
+            || has_binary_po_algs(attr, {attr_t::post_ops_t::kind_t::DIV})
             || std::any_of(dt_with_nan.begin(), dt_with_nan.end(),
                     [&](dnnl_data_type_t dt) { return got_mem.dt() == dt; });
     const bool has_exp_eltwise

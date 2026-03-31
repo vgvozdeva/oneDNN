@@ -617,7 +617,7 @@ int init_prim(const thr_ctx_t &thr_ctx,
 //
 // Note: a dedicated non-templated type for `setup_cmp_func_t` could be used but
 // since it relies on a `prb_t` type which is individual for each driver,
-// it is'nt possible without a template.
+// it isn't possible without a template.
 template <typename setup_cmp_func_t, typename prb_t>
 void check_correctness(const prb_t *prb, const std::vector<data_kind_t> &kinds,
         const args_t &args, const args_t &ref_args,
