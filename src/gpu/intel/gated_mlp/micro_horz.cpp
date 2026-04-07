@@ -197,7 +197,7 @@ status_t micro_horz_t::pd_t::init_microkernels(
                     && (problem.Tb != gemmstone::Type::invalid),
             status::unimplemented, "Incompatible A/B types in uGEMM.");
 
-    auto problem_wgu = problem;
+    auto problem_wgu = std::move(problem);
     problem_wgu.A.layout = gemmstone::MatrixLayout::T;
     problem_wgu.B.layout = gemmstone::MatrixLayout::Pr;
     problem_wgu.C.layout = gemmstone::MatrixLayout::T;
