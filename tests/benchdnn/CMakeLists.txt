@@ -208,9 +208,11 @@ foreach(driver ${all_drivers})
         endif()
     elseif(DNNL_TEST_SET_COVERAGE EQUAL DNNL_TEST_SET_NIGHTLY)
         ## Filter out gpu, large cpu and invalid inputs from cpu
+        ##
+        ## Note: put longer/specialized names first to keep filtering working.
         foreach(test_file ${test_files_large_cpu} ${test_files_gpu_ci}
-            ${test_files_gpu} ${test_files_ci} ${test_files_smoke}
-            ${test_files_gpu_smoke})
+            ${test_files_gpu_smoke} ${test_files_gpu} ${test_files_ci}
+            ${test_files_smoke})
             string(REPLACE "${test_file}" "" test_files_cpu "${test_files_cpu}")
         endforeach()
         ## Then filter files with "all" suffix by exact name since there may
