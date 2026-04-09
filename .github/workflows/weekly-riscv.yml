@@ -162,6 +162,7 @@ jobs:
         working-directory: ${{ github.workspace }}/oneDNN/build
         env:
           CTEST_PARALLEL_LEVEL: 4
+          ONEDNN_TEST_PARTITION: balanced
           ONEDNN_THREADING: ${{ matrix.config.threading }}
           ONEDNN_TEST_SET: ${{ matrix.config.testset }}
           ONEDNN_TEST_PART: ${{ matrix.config.part }}
