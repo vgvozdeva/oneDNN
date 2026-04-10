@@ -120,6 +120,9 @@ status_t convert_to_acl_act(alg_kind_t eltwise_alg, float alpha, float beta,
         case eltwise_gelu_erf:
             act_info = ActivationLayerInfo(act_func::GELU);
             break;
+        case eltwise_swish:
+            act_info = ActivationLayerInfo(act_func::SWISH, alpha, beta);
+            break;
         default: act_info = ActivationLayerInfo(); return status::unimplemented;
     }
 
