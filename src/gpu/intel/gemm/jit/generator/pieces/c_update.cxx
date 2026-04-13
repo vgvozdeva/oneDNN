@@ -2101,7 +2101,7 @@ void Generator<hw>::convert(const GRFMultirange &range, Type Told, Type Tnew, co
     if (Told == Tnew)
         return;
     if (Told.isInt4() || Tnew.isInt4()) stub();
-    if (Told == Type::hf8 || Tnew == Type::hf8) stub();
+    if (Told == Type::hf8) stub();
 
     // Special path: x32->FP.
     if (one_of(Told, {Type::s32, Type::u32}) && Tnew.isFP()) {
@@ -2112,27 +2112,17 @@ void Generator<hw>::convert(const GRFMultirange &range, Type Told, Type Tnew, co
         if (Told == Tnew) return;
     }
 
-    // Special path: f32->bf8.
-    if (hw >= HW::XeHPC && Told == Type::f32 && Tnew == Type::bf8) {
+    // Special path: f32->fp8.
+    if (Told == Type::f32 && one_of(Tnew, {Type::bf8, Type::hf8})) {
         int ne = elementsPerGRF<uint32_t>(hw);
-        for (int i = 0; i < range.getLen(); i++)
-            mov(ne, range[i].hf(), range[i].f());
-        for (int i = 0; i < range.getLen(); i++)
-            mov(ne, range[i].bf8(), range[i].hf());
-        for (int i = 0; i < range.getLen(); i++)
-            mov(ne, range[i].ub(0)(4), range[i].ub());
-        return;
-    }
-
-    // Special path: f32->hf8.
-    if (hw >= HW::Xe3 && Told == Type::f32 && Tnew == Type::hf8) {
-        int ne = elementsPerGRF<uint32_t>(hw);
-        for (int i = 0; i < range.getLen(); i++)
-            mov(ne, range[i].hf(), range[i].f());
-        for (int i = 0; i < range.getLen(); i++)
-            mov(ne, range[i].hf8(), range[i].hf());
-        for (int i = 0; i < range.getLen(); i++)
-            mov(ne, range[i].ub(0)(4), range[i].ub());
+        CopyPlan plan(hw, strategy.systolicAvailable);
+        for (int i = 0; i < range.getLen(); i++) {
+            CopyOperand sOp = range[i].f();
+            CopyOperand dOp = range[i].retype(Tnew.ngen());
+            dOp.stride = 4;
+            plan.append(Opcode::mov, ne, dOp, sOp);
+        }
+        copyExecute(std::move(plan), state);
         return;
     }
 
