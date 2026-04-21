@@ -4,6 +4,8 @@
 #include "oneapi/dnnl/dnnl.h"
 #include "oneapi/dnnl/dnnl_config.h"
 
+namespace dnnl {
+
 TEST(EnvHardening, JitDumpEnvIgnoredWhenDisabled) {
 #if DNNL_ENABLE_JIT_DUMP_ENV
     GTEST_SKIP() << "JIT_DUMP env hardening disabled in this build";
@@ -36,4 +38,5 @@ TEST(EnvHardening, JitDumpEnvHonoredWhenEnabled) {
     EXPECT_EQ(enabled, 1);
 
     unsetenv("ONEDNN_JIT_DUMP");
+}
 }
