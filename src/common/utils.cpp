@@ -365,7 +365,7 @@ bool is_destroying_cache_safe() {
 } // namespace dnnl
 
 dnnl_status_t dnnl_set_jit_dump(int enabled) {
-
+    using namespace dnnl::impl; 
 #if !DNNL_ENABLE_JIT_DUMP_ENV
     (void)enabled;
     return status::unimplemented;
