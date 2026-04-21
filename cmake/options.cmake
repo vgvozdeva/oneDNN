@@ -58,6 +58,14 @@ option(ONEDNN_ENABLE_GRAPH_DUMP "enables control of dumping graph artifacts via
     ONEDNN_GRAPH_DUMP environment variable. The option and feature are valid only
     when ONEDNN_BUILD_GRAPH is ON" ON) # enabled by default
 
+option (DNNL_ENABLE_JIT_DUMP_ENV
+        "allows oneDNN to honor ONEDNN_JIT_DUMP environment variable"
+        OFF)
+
+option (DNNL_ENABLE_DEFAULT_FPMATH_MODE_ENV
+       "allows oneDNN to honor ONEDNN_DEFAULT_FPMATH_MODE environment variable"
+        OFF)
+
 # =============================
 # Building properties and scope
 # =============================

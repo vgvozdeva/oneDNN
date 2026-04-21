@@ -187,6 +187,9 @@
 // is enabled.
 #cmakedefine01 DNNL_EXPERIMENTAL_GROUPED_MEMORY
 
+#cmakedefine01 DNNL_ENABLE_JIT_DUMP_ENV
+#cmakedefine01 DNNL_ENABLE_DEFAULT_FPMATH_MODE_ENV
+
 // When defined, it disables GPU compute reference kernels.
 #cmakedefine DNNL_DISABLE_GPU_REF_KERNELS
 

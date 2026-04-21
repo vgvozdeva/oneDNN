@@ -68,6 +68,7 @@ file(GLOB PRIM_TEST_CASES_SRC
                               test_cross_engine_reorder.cpp
                               test_concat.cpp
                               test_eltwise.cpp
+                              test_env.cpp
                               test_pooling_forward.cpp
                               test_pooling_backward.cpp
                               test_batch_normalization.cpp
