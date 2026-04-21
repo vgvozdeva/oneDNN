@@ -29,6 +29,14 @@
 #include <sys/types.h>
 #endif
 
+#ifndef DNNL_ENABLE_JIT_DUMP_ENV
+#define DNNL_ENABLE_JIT_DUMP_ENV 0
+#endif
+
+#ifndef DNNL_ENABLE_DEFAULT_FPMATH_MODE_ENV
+#define DNNL_ENABLE_DEFAULT_FPMATH_MODE_ENV 0
+#endif
+
 #include <algorithm>
 #include <climits>
 #include <cstdio>
@@ -223,11 +231,19 @@ int32_t fetch_and_add(int32_t *dst, int32_t val) {
 
 static setting_t<bool> jit_dump {false};
 bool get_jit_dump() {
-    if (!jit_dump.initialized()) {
+
+if (!jit_dump.initialized()) {
+#if DNNL_ENABLE_JIT_DUMP_ENV
+
         static bool val = getenv_int_user("JIT_DUMP", jit_dump.get());
+#else
+
+        static bool val = jit_dump.get();
+#endif
         jit_dump.set(val);
     }
     return jit_dump.get();
+
 }
 
 #if defined(DNNL_AARCH64) && (DNNL_AARCH64 == 1)
@@ -349,9 +365,17 @@ bool is_destroying_cache_safe() {
 } // namespace dnnl
 
 dnnl_status_t dnnl_set_jit_dump(int enabled) {
-    using namespace dnnl::impl;
-    jit_dump.set(enabled);
+
+#if !DNNL_ENABLE_JIT_DUMP
+    (void)enabled;
+    return status::unimplemented;
+#else
+    const int v = (enabled != 0) ? 1 : 0;
+    jit_dump.set(v);
+
     return status::success;
+#endif
+
 }
 
 dnnl_status_t dnnl_set_jit_profiling_flags(unsigned flags) {
