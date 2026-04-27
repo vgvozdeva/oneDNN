@@ -75,7 +75,7 @@ jobs:
 
           cat > BUILD.bazel << 'EOF'
           load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-          load("//bazel:dnnl_config_substitutions.bzl",
+           load("//:bazel/dnnl_config_substitutions.bzl",
              "DNNL_CONFIG_SUBSTITUTIONS_OMP",
              "DNNL_VERSION_HASH_SUBSTITUTIONS",
              "DNNL_VERSION_SUBSTITUTIONS")
