@@ -37,3 +37,22 @@ $ ./scripts/generate_format_tags.py
 ## Verbose converter
 
 See [verbose_converter/README.md](verbose_converter/README.md)
+
+## Generating Bazel substitutions for dnnl_config.h.in
+
+`generate_bazel_dnnl_substitutions.py` generates a Starlark substitutions file
+for Bazel `expand_template(...)` from oneDNN configuration templates.
+
+### Usage
+
+```sh
+$ ./scripts/generate_bazel_dnnl_substitutions.py
+```
+
+The script updates `bazel/dnnl_config_substitutions.bzl`.
+
+Optional overrides can be passed with `--set NAME=VALUE`, for example:
+
+```sh
+$ ./scripts/generate_bazel_dnnl_substitutions.py --set ONEDNN_BUILD_GRAPH=OFF
+```
