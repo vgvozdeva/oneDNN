@@ -81,8 +81,9 @@ requests by:
 
 See [Bazel Config Smoke workflow](../.github/workflows/bazel-config-smoke.yml).
 
-For stronger consumer validation, the repository also includes
-[TensorFlow Integration Smoke](../.github/workflows/tensorflow-integration-smoke.yml).
-It checks out TensorFlow, vendors this oneDNN tree into
-`third_party/xla/third_party/mkl_dnn`, and builds TensorFlow's
-`//third_party/xla/third_party/mkl_dnn:mkl_dnn` Bazel target.
+For stronger compile validation without external repository dependencies, the
+repository also includes
+[oneDNN Bazel Build Compliance](../.github/workflows/tensorflow-integration-smoke.yml).
+It generates oneDNN config/version headers via Bazel `expand_template(...)` and
+builds a Bazel `cc_library` from oneDNN common sources against those generated
+headers.
