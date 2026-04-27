@@ -51,10 +51,10 @@ jobs:
         run: |
           set -eux
           BAZELISK_VERSION=v1.26.0
-          curl -fsSL -o bazel \
+          curl -fsSL -o bazelisk \
             "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-amd64"
-          chmod +x bazel
-          sudo mv bazel /usr/local/bin/bazel
+          chmod +x bazelisk
+          sudo mv bazelisk /usr/local/bin/bazel
           bazel --version
 
       - name: Regenerate substitutions
