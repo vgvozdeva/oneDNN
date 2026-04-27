@@ -1,0 +1,107 @@
+# *******************************************************************************
+# Copyright 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# *******************************************************************************
+
+name: "TensorFlow Integration Smoke"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".github/workflows/tensorflow-integration-smoke.yml"
+      - "CMakeLists.txt"
+      - "include/oneapi/dnnl/dnnl_config.h.in"
+      - "include/oneapi/dnnl/dnnl_version.h.in"
+      - "include/oneapi/dnnl/dnnl_version_hash.h.in"
+      - "scripts/generate_bazel_dnnl_substitutions.py"
+      - "bazel/**"
+  workflow_dispatch:
+    inputs:
+      tensorflow_ref:
+        description: "TensorFlow git ref to test against"
+        required: false
+        default: "master"
+  schedule:
+    - cron: "0 4 * * 1"
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  tf-integration:
+    name: Build TensorFlow mkl_dnn target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout oneDNN
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          path: oneDNN
+
+      - name: Determine TensorFlow ref
+        id: tf-ref
+        run: |
+          set -eu
+          TF_REF="${{ github.event.inputs.tensorflow_ref || 'master' }}"
+          echo "ref=${TF_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout TensorFlow
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: tensorflow/tensorflow
+          ref: ${{ steps.tf-ref.outputs.ref }}
+          persist-credentials: false
+          path: tensorflow
+          fetch-depth: 1
+
+      - name: Install Bazelisk
+        run: |
+          set -eux
+          BAZELISK_VERSION=v1.26.0
+          curl -fsSL -o bazelisk \
+            "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-amd64"
+          chmod +x bazelisk
+          sudo mv bazelisk /usr/local/bin/bazel
+          bazel --version
+
+      - name: Regenerate oneDNN Bazel substitutions
+        working-directory: oneDNN
+        run: |
+          set -eux
+          python3 ./scripts/generate_bazel_dnnl_substitutions.py
+          git diff --exit-code -- bazel/dnnl_config_substitutions.bzl
+
+      - name: Vendor oneDNN into TensorFlow XLA mkl_dnn
+        run: |
+          set -eux
+          TF_ONEDNN_DIR="tensorflow/third_party/xla/third_party/mkl_dnn"
+          rm -rf "${TF_ONEDNN_DIR}"
+          mkdir -p "${TF_ONEDNN_DIR}"
+          rsync -a --delete --exclude '.git' oneDNN/ "${TF_ONEDNN_DIR}/"
+
+      - name: Build TensorFlow oneDNN target
+        working-directory: tensorflow
+        run: |
+          set -eux
+          bazel build \
+            --repo_env=PYTHON_BIN_PATH="$(which python3)" \
+            --config=opt \
+            --verbose_failures \
+            //third_party/xla/third_party/mkl_dnn:mkl_dnn

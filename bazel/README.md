@@ -80,3 +80,9 @@ requests by:
     - `dnnl_version_hash.h.in`
 
 See [Bazel Config Smoke workflow](../.github/workflows/bazel-config-smoke.yml).
+
+For stronger consumer validation, the repository also includes
+[TensorFlow Integration Smoke](../.github/workflows/tensorflow-integration-smoke.yml).
+It checks out TensorFlow, vendors this oneDNN tree into
+`third_party/xla/third_party/mkl_dnn`, and builds TensorFlow's
+`//third_party/xla/third_party/mkl_dnn:mkl_dnn` Bazel target.
