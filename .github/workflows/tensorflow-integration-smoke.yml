@@ -102,6 +102,5 @@ jobs:
           set -eux
           bazel build \
             --repo_env=PYTHON_BIN_PATH="$(which python3)" \
-            --config=opt \
             --verbose_failures \
             //third_party/xla/third_party/mkl_dnn:mkl_dnn
