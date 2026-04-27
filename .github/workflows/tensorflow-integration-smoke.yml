@@ -115,7 +115,7 @@ jobs:
               "include/**/*.h",
               "src/common/**/*.h",
               "src/common/**/*.hpp",
-            ]),
+            ], allow_empty = True),
             copts = ["-std=c++11"],
             includes = ["include", "src"],
             visibility = ["//visibility:public"],
