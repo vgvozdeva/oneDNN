@@ -1,0 +1,128 @@
+# *******************************************************************************
+# Copyright 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# *******************************************************************************
+
+name: "Bazel Config Smoke"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".github/workflows/bazel-config-smoke.yml"
+      - "CMakeLists.txt"
+      - "include/oneapi/dnnl/dnnl_config.h.in"
+      - "include/oneapi/dnnl/dnnl_version.h.in"
+      - "include/oneapi/dnnl/dnnl_version_hash.h.in"
+      - "scripts/generate_bazel_dnnl_substitutions.py"
+      - "scripts/README.md"
+      - "bazel/**"
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  bazel-config-smoke:
+    name: Generate + Bazel expand_template
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Bazelisk
+        run: |
+          set -eux
+          BAZELISK_VERSION=v1.26.0
+          curl -fsSL -o bazel \
+            "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-amd64"
+          chmod +x bazel
+          sudo mv bazel /usr/local/bin/bazel
+          bazel --version
+
+      - name: Regenerate substitutions
+        run: python3 ./scripts/generate_bazel_dnnl_substitutions.py
+
+      - name: Verify generated file is up to date
+        run: git diff --exit-code -- bazel/dnnl_config_substitutions.bzl
+
+      - name: Create temporary Bazel workspace metadata
+        run: |
+          set -eux
+          cat > MODULE.bazel << 'EOF'
+          bazel_dep(name = "bazel_skylib", version = "1.7.1")
+          EOF
+
+          cat > include/oneapi/dnnl/BUILD.bazel << 'EOF'
+          exports_files([
+              "dnnl_config.h.in",
+              "dnnl_version.h.in",
+              "dnnl_version_hash.h.in",
+          ])
+          EOF
+
+          cat > bazel/BUILD.bazel << 'EOF'
+          load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+          load("//bazel:dnnl_config_substitutions.bzl",
+               "DNNL_CONFIG_SUBSTITUTIONS_OMP",
+               "DNNL_CONFIG_SUBSTITUTIONS_THREADPOOL",
+               "DNNL_VERSION_HASH_SUBSTITUTIONS",
+               "DNNL_VERSION_SUBSTITUTIONS")
+
+          expand_template(
+              name = "dnnl_config_h_omp",
+              out = "dnnl_config_omp.h",
+              substitutions = DNNL_CONFIG_SUBSTITUTIONS_OMP,
+              template = "//include/oneapi/dnnl:dnnl_config.h.in",
+          )
+
+          expand_template(
+              name = "dnnl_config_h_threadpool",
+              out = "dnnl_config_threadpool.h",
+              substitutions = DNNL_CONFIG_SUBSTITUTIONS_THREADPOOL,
+              template = "//include/oneapi/dnnl:dnnl_config.h.in",
+          )
+
+          expand_template(
+              name = "dnnl_version_h",
+              out = "dnnl_version.h",
+              substitutions = DNNL_VERSION_SUBSTITUTIONS,
+              template = "//include/oneapi/dnnl:dnnl_version.h.in",
+          )
+
+          expand_template(
+              name = "dnnl_version_hash_h",
+              out = "dnnl_version_hash.h",
+              substitutions = DNNL_VERSION_HASH_SUBSTITUTIONS,
+              template = "//include/oneapi/dnnl:dnnl_version_hash.h.in",
+          )
+          EOF
+
+      - name: Bazel build generated headers
+        run: |
+          set -eux
+          bazel build //bazel:dnnl_config_h_omp //bazel:dnnl_config_h_threadpool //bazel:dnnl_version_h //bazel:dnnl_version_hash_h
+
+      - name: Validate generated header content
+        run: |
+          set -eux
+          grep -q "#define DNNL_CPU_RUNTIME DNNL_RUNTIME_OMP" bazel-bin/bazel/dnnl_config_omp.h
+          grep -q "#define DNNL_CPU_RUNTIME DNNL_RUNTIME_THREADPOOL" bazel-bin/bazel/dnnl_config_threadpool.h
+          grep -q "#define DNNL_VERSION_MAJOR" bazel-bin/bazel/dnnl_version.h
