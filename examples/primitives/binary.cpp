@@ -51,13 +51,13 @@ void binary_example(dnnl::engine::kind engine_kind) {
 
     // Tensor dimensions.
     const memory::dim N = 3, // batch size
-            IC = 3, // channels
             IH = 150, // tensor height
-            IW = 150; // tensor width
+            IW = 150, // tensor width
+            IC = 3; // channels
 
     // Source (src_0 and src_1) and destination (dst) tensors dimensions.
-    memory::dims src_0_dims = {N, IC, IH, IW};
-    memory::dims src_1_dims = {N, IC, IH, 1};
+    memory::dims src_0_dims = {N, IH, IW, IC};
+    memory::dims src_1_dims = {N, IH, 1, IC};
 
     // Allocate buffers.
     std::vector<float> src_0_data(product(src_0_dims));
@@ -75,11 +75,11 @@ void binary_example(dnnl::engine::kind engine_kind) {
 
     // Create src and dst memory descriptors.
     auto src_0_md = memory::desc(
-            src_0_dims, memory::data_type::f32, memory::format_tag::nchw);
+            src_0_dims, memory::data_type::f32, memory::format_tag::nhwc);
     auto src_1_md = memory::desc(
-            src_1_dims, memory::data_type::f32, memory::format_tag::nchw);
+            src_1_dims, memory::data_type::f32, memory::format_tag::nhwc);
     auto dst_md = memory::desc(
-            src_0_dims, memory::data_type::f32, memory::format_tag::nchw);
+            src_0_dims, memory::data_type::f32, memory::format_tag::nhwc);
 
     // Create src memory objects.
     auto src_0_mem = memory(src_0_md, engine);

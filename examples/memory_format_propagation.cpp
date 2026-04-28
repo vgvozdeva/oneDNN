@@ -84,7 +84,7 @@
 /// a pooling and consists of the following steps:
 /// 1. Create a pooling primitive descriptor based on the memory format chosen
 ///    by the convolution primitive.
-/// 2. Create memory descriptors for input and output data in the NCHW memory
+/// 2. Create memory descriptors for input and output data in the NHWC memory
 ///    format.
 /// 3. Determine if input and output data needs to be reordered from/to the
 ///    optimized memory format.
@@ -176,20 +176,20 @@ void memory_format_propagation_tutorial(engine::kind engine_kind) {
     /// @subsection memory_format_propagation_sub3 Create source and destination memory objects
     ///
     /// We assume that the 'user' source and destination memory format is
-    /// NCHW. Since there is no result validation in this tutorial, we do not
+    /// NHWC. Since there is no result validation in this tutorial, we do not
     /// bother with filling the data with some values and let oneDNN
     /// allocate the memory.
     ///
     /// @snippet memory_format_propagation.cpp Create source and destination memory objects
     // [Create source and destination memory objects]
     auto src_mem = memory(
-            {{N, IC, H, W}, memory::data_type::f32, memory::format_tag::nchw},
+            {{N, H, W, IC}, memory::data_type::f32, memory::format_tag::nhwc},
             eng);
     auto weights_mem = memory({{OC, IC, KH, KW}, memory::data_type::f32,
                                       memory::format_tag::oihw},
             eng);
     auto dst_mem = memory(
-            {{N, OC, H, W}, memory::data_type::f32, memory::format_tag::nchw},
+            {{N, H, W, OC}, memory::data_type::f32, memory::format_tag::nhwc},
             eng);
     // [Create source and destination memory objects]
 
