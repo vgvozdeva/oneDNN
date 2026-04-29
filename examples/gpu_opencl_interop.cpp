@@ -141,17 +141,18 @@ void gpu_opencl_interop_tutorial() {
     /// Next, we create a memory object. We need to specify dimensions of our
     /// memory by passing a memory::dims object. Then we create a memory
     /// descriptor with these dimensions, with the dnnl::memory::data_type::f32
-    /// data type, and with the dnnl::memory::format_tag::nchw memory format.
+    /// data type, and with the dnnl::memory::format_tag::nhwv memory format.
     /// Finally, we construct a memory object and pass the memory descriptor.
     /// The library allocates memory internally.
     /// @snippet  gpu_opencl_interop.cpp memory alloc
     //  [memory alloc]
     memory::dims tz_dims = {2, 3, 4, 5};
+    //????
     const size_t N = std::accumulate(tz_dims.begin(), tz_dims.end(), (size_t)1,
             std::multiplies<size_t>());
 
     memory::desc mem_d(
-            tz_dims, memory::data_type::f32, memory::format_tag::nchw);
+            tz_dims, memory::data_type::f32, memory::format_tag::nhwc);
 
     memory mem(mem_d, eng);
     //  [memory alloc]

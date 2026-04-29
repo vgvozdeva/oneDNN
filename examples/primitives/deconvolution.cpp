@@ -52,9 +52,9 @@ void deconvolution_example(dnnl::engine::kind engine_kind) {
 
     // Tensor dimensions.
     const memory::dim N = 3, // batch size
-            IC = 32, // input channels
             IH = 13, // input height
             IW = 13, // input width
+            IC = 32, // input channels
             OC = 64, // output channels
             KH = 3, // weights height
             KW = 3, // weights width
@@ -75,10 +75,10 @@ void deconvolution_example(dnnl::engine::kind engine_kind) {
 
     // Source (src), weights, bias, and destination (dst) tensors
     // dimensions.
-    memory::dims src_dims = {N, IC, IH, IW};
-    memory::dims weights_dims = {OC, IC, KH, KW};
+    memory::dims src_dims = {N, IH, IW, IC};
+    memory::dims weights_dims = {OC, KH, KW, IC};
     memory::dims bias_dims = {OC};
-    memory::dims dst_dims = {N, OC, OH, OW};
+    memory::dims dst_dims = {N, OH, OW, OC};
 
     // Strides, padding dimensions.
     memory::dims strides_dims = {SH, SW};
@@ -106,15 +106,15 @@ void deconvolution_example(dnnl::engine::kind engine_kind) {
     });
 
     // Create memory objects for tensor data (src, weights, dst). In this
-    // example, NCHW layout is assumed for src and dst, and OIHW for weights.
+    // example, NHWC layout is assumed for src and dst, and OIHW for weights.
     auto user_src_mem = memory(
-            {src_dims, memory::data_type::f32, memory::format_tag::nchw},
+            {src_dims, memory::data_type::f32, memory::format_tag::nhwc},
             engine);
     auto user_weights_mem = memory(
-            {weights_dims, memory::data_type::f32, memory::format_tag::oihw},
+            {weights_dims, memory::data_type::f32, memory::format_tag::ohwi},
             engine);
     auto user_dst_mem = memory(
-            {dst_dims, memory::data_type::f32, memory::format_tag::nchw},
+            {dst_dims, memory::data_type::f32, memory::format_tag::nhwc},
             engine);
 
     // Create memory descriptors with format_tag::any for the primitive. This
