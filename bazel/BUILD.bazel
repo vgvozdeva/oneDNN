@@ -1,0 +1,156 @@
+"""Bazel package exposing oneDNN build flags and config_settings.
+
+Override flags on the command line, e.g.:
+  --@onednn//bazel:dnnl_cpu_runtime=OMP
+  --@onednn//bazel:dnnl_experimental=true
+  --@onednn//bazel:onednn_build_graph=false
+"""
+
+load("@bazel_skylib//rules/common_settings.bzl", "bool_flag", "string_flag")
+
+# ---------------------------------------------------------------------------
+# Runtime selectors
+# ---------------------------------------------------------------------------
+
+string_flag(
+    name = "dnnl_cpu_runtime",
+    build_setting_default = "THREADPOOL",
+    values = ["OMP", "THREADPOOL", "TBB", "SEQ"],
+    visibility = ["//visibility:public"],
+)
+
+string_flag(
+    name = "dnnl_gpu_runtime",
+    build_setting_default = "NONE",
+    values = ["NONE", "OCL", "SYCL"],
+    visibility = ["//visibility:public"],
+)
+
+string_flag(
+    name = "dnnl_gpu_vendor",
+    build_setting_default = "NONE",
+    values = ["NONE", "INTEL", "NVIDIA", "AMD"],
+    visibility = ["//visibility:public"],
+)
+
+# ---------------------------------------------------------------------------
+# Feature flags
+# ---------------------------------------------------------------------------
+
+bool_flag(
+    name = "dnnl_experimental",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+bool_flag(
+    name = "dnnl_experimental_ukernel",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+bool_flag(
+    name = "dnnl_experimental_profiling",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+bool_flag(
+    name = "dnnl_experimental_logging",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+bool_flag(
+    name = "onednn_build_graph",
+    build_setting_default = True,
+    visibility = ["//visibility:public"],
+)
+
+bool_flag(
+    name = "dnnl_enable_stack_checker",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+bool_flag(
+    name = "dnnl_use_rt_objects_in_primitive_cache",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+# ---------------------------------------------------------------------------
+# config_settings — for use in select() in consuming BUILD files
+# ---------------------------------------------------------------------------
+
+config_setting(
+    name = "dnnl_cpu_runtime_omp",
+    flag_values = {":dnnl_cpu_runtime": "OMP"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_cpu_runtime_threadpool",
+    flag_values = {":dnnl_cpu_runtime": "THREADPOOL"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_cpu_runtime_tbb",
+    flag_values = {":dnnl_cpu_runtime": "TBB"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_cpu_runtime_seq",
+    flag_values = {":dnnl_cpu_runtime": "SEQ"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_gpu_runtime_ocl",
+    flag_values = {":dnnl_gpu_runtime": "OCL"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_gpu_runtime_sycl",
+    flag_values = {":dnnl_gpu_runtime": "SYCL"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_experimental_enabled",
+    flag_values = {":dnnl_experimental": "true"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_experimental_ukernel_enabled",
+    flag_values = {":dnnl_experimental_ukernel": "true"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_experimental_profiling_enabled",
+    flag_values = {":dnnl_experimental_profiling": "true"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_experimental_logging_enabled",
+    flag_values = {":dnnl_experimental_logging": "true"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "onednn_build_graph_disabled",
+    flag_values = {":onednn_build_graph": "false"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "dnnl_enable_stack_checker_enabled",
+    flag_values = {":dnnl_enable_stack_checker": "true"},
+    visibility = ["//visibility:public"],
+)
