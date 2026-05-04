@@ -48,13 +48,13 @@ void eltwise_example(dnnl::engine::kind engine_kind) {
 
     // Tensor dimensions.
     const memory::dim N = 3, // batch size
+            IC = 3, // channels
             IH = 227, // tensor height
-            IW = 227, // tensor width
-            IC = 3; // channels
+            IW = 227; // tensor width
 
     // Source (src) and destination (dst) tensors dimensions.
-    memory::dims src_dims = {N, IC, IH, IW,};
-    memory::dims dst_dims = {N, IC, IH, IW,};
+    memory::dims src_dims = {N, IC, IH, IW};
+    memory::dims dst_dims = {N, IC, IH, IW};
 
     // Allocate buffers. In this example, out-of-place primitive execution is
     // demonstrated since both src and dst are required for later backward

@@ -50,7 +50,7 @@ void sum_example(dnnl::engine::kind engine_kind) {
 
     // Tensor dimensions.
     const memory::dim N = 3, // batch size
-            IC = 3,  // channels
+            IC = 3, // channels
             IH = 227, // tensor height
             IW = 227; // tensor width
 
