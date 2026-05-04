@@ -53,12 +53,12 @@ void batch_normalization_example(dnnl::engine::kind engine_kind) {
 
     // Tensor dimensions.
     const memory::dim N = 3, // batch size
+            IC = 3, // channels
             IH = 227, // tensor height
-            IW = 227, // tensor width
-            IC = 3; // channels
+            IW = 227; // tensor width
 
     // Source (src) and destination (dst) tensors dimensions.
-    memory::dims src_dims = {N, IH, IW, IC};
+    memory::dims src_dims = {N, IC, IH, IW};
 
     // Scale/shift tensor dimensions.
     memory::dims scaleshift_dims = {IC};

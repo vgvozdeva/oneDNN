@@ -52,7 +52,7 @@ void concat_example(dnnl::engine::kind engine_kind) {
 
     // Tensor dimensions.
     const memory::dim N = 3, // batch size
-            IC = 3,
+            IC = 3, // channels
             IH = 120, // tensor height
             IW = 120; // tensor width
 
