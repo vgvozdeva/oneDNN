@@ -505,12 +505,12 @@ void performance_profiling(engine::kind engine_kind, int argc, char **argv) {
     // [Set dimensions]
 
     // [Create memory objects]
-    // create oneDNN memory objects for user's tensors (in nhwc and ohwi formats)
+    // create oneDNN memory objects for user's tensors (in nhwc and oihw formats)
     auto user_src = memory({{BATCH, IC, IH, IW}, memory::data_type::f32,
                                    memory::format_tag::nhwc},
             eng);
     auto user_wei = memory({{OC, IC, KH, KW}, memory::data_type::f32,
-                                   memory::format_tag::ohwi},
+                                   memory::format_tag::oihw},
             eng);
     auto user_dst = memory({{BATCH, OC, OH, OW}, memory::data_type::f32,
                                    memory::format_tag::nhwc},

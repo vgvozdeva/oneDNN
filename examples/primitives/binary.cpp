@@ -51,13 +51,13 @@ void binary_example(dnnl::engine::kind engine_kind) {
 
     // Tensor dimensions.
     const memory::dim N = 3, // batch size
-            IC = 3, // channels       
+            IC = 3, // channels
             IH = 150, // tensor height
             IW = 150; // tensor width
 
     // Source (src_0 and src_1) and destination (dst) tensors dimensions.
     memory::dims src_0_dims = {N, IC, IH, IW};
-    memory::dims src_1_dims = {N, IC, 1, IW};
+    memory::dims src_1_dims = {N, IC, IH, 1};
 
     // Allocate buffers.
     std::vector<float> src_0_data(product(src_0_dims));
