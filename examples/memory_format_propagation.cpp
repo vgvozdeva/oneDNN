@@ -183,13 +183,13 @@ void memory_format_propagation_tutorial(engine::kind engine_kind) {
     /// @snippet memory_format_propagation.cpp Create source and destination memory objects
     // [Create source and destination memory objects]
     auto src_mem = memory(
-            {{N, H, W, IC}, memory::data_type::f32, memory::format_tag::nhwc},
+            {{N, IC, H, W}, memory::data_type::f32, memory::format_tag::nhwc},
             eng);
     auto weights_mem = memory({{OC, IC, KH, KW}, memory::data_type::f32,
                                       memory::format_tag::oihw},
             eng);
     auto dst_mem = memory(
-            {{N, H, W, OC}, memory::data_type::f32, memory::format_tag::nhwc},
+            {{N, OC, H, W}, memory::data_type::f32, memory::format_tag::nhwc},
             eng);
     // [Create source and destination memory objects]
 
