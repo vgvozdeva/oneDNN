@@ -40,7 +40,7 @@
 /// The example has three different implementations of the mathematical
 /// operation:
 /// 1. *Naive implementation* executes 2D convolution followed by
-/// ReLU on the data in **NCHW** format. This implementation
+/// ReLU on the data in **NHWC** format. This implementation
 /// does not align with oneDNN best practices and results in
 /// suboptimal performance.
 /// 2. *Blocked format implementation* executes the same operations
@@ -74,9 +74,9 @@
 /// export ONEDNN_VERBOSE=profile_exec
 /// ~~~
 ///
-/// The program starts by creating oneDNN memory objects in **NCHW**
+/// The program starts by creating oneDNN memory objects in **NHWC**
 /// format. These are called `user_` because they are meant to represent the
-/// user's source data entering oneDNN with the NCHW format.
+/// user's source data entering oneDNN with the NHWC format.
 /// @page performance_profiling_cpp
 /// @snippet performance_profiling.cpp Set dimensions
 /// @page performance_profiling_cpp
@@ -143,7 +143,7 @@ primitive_attr create_attr_with_relu_post_op() {
 }
 // [Create post_op attr with relu]
 
-// Implementation for naive convolution on nchw (data) and oihw (weights),
+// Implementation for naive convolution on nhwc (data) and oihw (weights),
 // followed by execution of non-fused relu
 void conv_relu_naive(const memory &user_src, const memory &user_wei,
         memory user_dst, engine &eng, stream &s) {
@@ -159,7 +159,7 @@ void conv_relu_naive(const memory &user_src, const memory &user_wei,
     /// descriptors (`_md`) to match `user_` values--one `md` each for source,
     /// destination, and weight data. Then it uses those `md` to create the
     /// convolution primitive descriptor `conv_pd`, which tells oneDNN to use
-    /// plain format (NCHW) for the convolution.
+    /// plain format (NHWC) for the convolution.
     /// @page performance_profiling_cpp
     /// @snippet performance_profiling.cpp Create mem_desc
     // [Create mem_desc]
@@ -171,7 +171,7 @@ void conv_relu_naive(const memory &user_src, const memory &user_wei,
     /// @page performance_profiling_cpp
     /// Next the program creates a convolution primitive descriptor `conv_pd`
     /// and convolution primitive `conv`. These structs will inherit
-    /// NCHW format from `md` by way of the `conv_d`. Finally it creates
+    /// NHWC format from `md` by way of the `conv_d`. Finally it creates
     /// the convolution primitive `conv` and adds it to the stream `s`, and then
     /// executes the `create_and_execute_relu(user_dst)` function.
     /// @page performance_profiling_cpp
@@ -209,7 +209,7 @@ void conv_relu_naive(const memory &user_src, const memory &user_wei,
     /// operation, so the `create_and_execute_relu()` function uses whatever
     /// the input data format is at the time it is called.
     ///
-    /// Using NCHW data format may result in suboptimal performance for compute
+    /// Using NHWC data format may result in suboptimal performance for compute
     /// intensive primitives, as shown in the following ONEDNN_VERBOSE output
     /// by the convolution and relu execution
     /// times of 38.3 and 2.9 milliseconds, respectively.
@@ -505,15 +505,15 @@ void performance_profiling(engine::kind engine_kind, int argc, char **argv) {
     // [Set dimensions]
 
     // [Create memory objects]
-    // create oneDNN memory objects for user's tensors (in nchw and oihw formats)
+    // create oneDNN memory objects for user's tensors (in nhwc and ohwi formats)
     auto user_src = memory({{BATCH, IC, IH, IW}, memory::data_type::f32,
-                                   memory::format_tag::nchw},
+                                   memory::format_tag::nhwc},
             eng);
     auto user_wei = memory({{OC, IC, KH, KW}, memory::data_type::f32,
-                                   memory::format_tag::oihw},
+                                   memory::format_tag::ohwi},
             eng);
     auto user_dst = memory({{BATCH, OC, OH, OW}, memory::data_type::f32,
-                                   memory::format_tag::nchw},
+                                   memory::format_tag::nhwc},
             eng);
     // [Create memory objects]
 
@@ -533,7 +533,7 @@ void performance_profiling(engine::kind engine_kind, int argc, char **argv) {
     if (!(implementation == "validation" || implementation == "naive"
                 || implementation == "blocked" || implementation == "fused")) {
         std::cout << "The implementation can be one of:\n";
-        std::cout << " - naive: NCHW format without fusion\n";
+        std::cout << " - naive: NHWC format without fusion\n";
         std::cout << " - blocked: format propagation without fusion\n";
         std::cout << " - fused: format propagation with fusion\n";
         std::cout << " - validation: runs all implementations\n\n";
@@ -546,7 +546,7 @@ void performance_profiling(engine::kind engine_kind, int argc, char **argv) {
         std::cout << "Implementation: naive.\n";
         // run conv + relu w/o fusing
         conv_relu_naive(user_src, user_wei, user_dst, eng, s);
-        std::cout << "Conv + ReLU w/ nchw format completed.\n";
+        std::cout << "Conv + ReLU w/ nhwc format completed.\n";
     }
 
     if (implementation == "blocked" || implementation == "validation") {

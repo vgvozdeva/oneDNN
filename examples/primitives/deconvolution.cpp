@@ -80,6 +80,11 @@ void deconvolution_example(dnnl::engine::kind engine_kind) {
     memory::dims bias_dims = {OC};
     memory::dims dst_dims = {N, OH, OW, OC};
 
+        // Primitive logical dimensions use canonical deconvolution ordering.
+        memory::dims deconv_src_dims = {N, IC, IH, IW};
+        memory::dims deconv_weights_dims = {IC, OC, KH, KW};
+        memory::dims deconv_dst_dims = {N, OC, OH, OW};
+
     // Strides, padding dimensions.
     memory::dims strides_dims = {SH, SW};
     memory::dims padding_dims_l = {PH_L, PW_L};
@@ -106,7 +111,7 @@ void deconvolution_example(dnnl::engine::kind engine_kind) {
     });
 
     // Create memory objects for tensor data (src, weights, dst). In this
-    // example, NHWC layout is assumed for src and dst, and OIHW for weights.
+        // example, NHWC layout is assumed for src and dst, and OHWI for weights.
     auto user_src_mem = memory(
             {src_dims, memory::data_type::f32, memory::format_tag::nhwc},
             engine);
@@ -122,11 +127,11 @@ void deconvolution_example(dnnl::engine::kind engine_kind) {
     // optimized primitive implementation, and these layouts may differ from the
     // ones provided by the user.
     auto deconv_src_md = memory::desc(
-            src_dims, memory::data_type::f32, memory::format_tag::any);
+            deconv_src_dims, memory::data_type::f32, memory::format_tag::any);
     auto deconv_weights_md = memory::desc(
-            weights_dims, memory::data_type::f32, memory::format_tag::any);
+            deconv_weights_dims, memory::data_type::f32, memory::format_tag::any);
     auto deconv_dst_md = memory::desc(
-            dst_dims, memory::data_type::f32, memory::format_tag::any);
+            deconv_dst_dims, memory::data_type::f32, memory::format_tag::any);
 
     // Create memory descriptor and memory object for input bias.
     auto user_bias_md = memory::desc(

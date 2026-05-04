@@ -80,11 +80,13 @@ static void init_net_data(float *data, uint32_t dim, const dnnl_dim_t *dims) {
         }
     } else if (dim == 4) {
         for (dnnl_dim_t in = 0; in < dims[0]; ++in)
-            for (dnnl_dim_t ic = 0; ic < dims[1]; ++ic)
+        //    for (dnnl_dim_t ic = 0; ic < dims[1]; ++ic)
                 for (dnnl_dim_t ih = 0; ih < dims[2]; ++ih)
-                    for (dnnl_dim_t iw = 0; iw < dims[3]; ++iw) {
+                    for (dnnl_dim_t iw = 0; iw < dims[3]; ++iw)
+                        for (dnnl_dim_t ic = 0; ic < dims[1]; ++ic) {
                         dnnl_dim_t indx = in * dims[1] * dims[2] * dims[3]
-                                + ic * dims[2] * dims[3] + ih * dims[3] + iw;
+                    //            + ic * dims[2] * dims[3] + ih * dims[3] + iw;
+                                + ih * dims[2] * dims[3] + iw * dims[3] + ic;
                         data[indx] = (float)(indx % 1637);
                     }
     }
@@ -175,8 +177,8 @@ void simple_net(dnnl_engine_kind_t engine_kind) {
     args_t net_args[10];
 
     const int ndims = 4;
-    dnnl_dims_t net_src_sizes = {BATCH, IC, CONV_IH, CONV_IW};
-    dnnl_dims_t net_dst_sizes = {BATCH, OC, POOL_OH, POOL_OW};
+    dnnl_dims_t net_src_sizes = {BATCH, CONV_IH, CONV_IW, IC};
+    dnnl_dims_t net_dst_sizes = {BATCH, POOL_OH, POOL_OW, OC,};
 
     float *net_src
             = (float *)malloc(product(net_src_sizes, ndims) * sizeof(float));
@@ -195,7 +197,7 @@ void simple_net(dnnl_engine_kind_t engine_kind) {
         conv_user_src_sizes[i] = net_src_sizes[i];
     dnnl_dims_t conv_user_weights_sizes = {OC, IC, 11, 11};
     dnnl_dims_t conv_bias_sizes = {OC};
-    dnnl_dims_t conv_user_dst_sizes = {BATCH, OC, CONV_OH, CONV_OW};
+    dnnl_dims_t conv_user_dst_sizes = {BATCH, CONV_OH, CONV_OW, OC};
     dnnl_dims_t conv_strides = {CONV_STRIDE, CONV_STRIDE};
     dnnl_dims_t conv_dilation = {0, 0};
     dnnl_dims_t conv_padding = {CONV_PAD, CONV_PAD};
@@ -212,9 +214,9 @@ void simple_net(dnnl_engine_kind_t engine_kind) {
     // create memory for user data
     dnnl_memory_t conv_user_src_memory, conv_user_weights_memory,
             conv_user_bias_memory;
-    init_data_memory(ndims, conv_user_src_sizes, dnnl_nchw, engine, conv_src,
+    init_data_memory(ndims, conv_user_src_sizes, dnnl_nhwc, engine, conv_src,
             &conv_user_src_memory);
-    init_data_memory(ndims, conv_user_weights_sizes, dnnl_oihw, engine,
+    init_data_memory(ndims, conv_user_weights_sizes, dnnl_ohwi, engine,
             conv_weights, &conv_user_weights_memory);
     init_data_memory(1, conv_bias_sizes, dnnl_x, engine, conv_bias,
             &conv_user_bias_memory);
@@ -375,7 +377,7 @@ void simple_net(dnnl_engine_kind_t engine_kind) {
 
     // create memory for user data
     dnnl_memory_t pool_user_dst_memory;
-    init_data_memory(ndims, pool_dst_sizes, dnnl_nchw, engine, net_dst,
+    init_data_memory(ndims, pool_dst_sizes, dnnl_nhwc, engine, net_dst,
             &pool_user_dst_memory);
 
     // create a pooling

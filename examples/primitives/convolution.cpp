@@ -44,20 +44,24 @@ using namespace dnnl;
 
 void convolution_example(dnnl::engine::kind engine_kind) {
 
+        std::cout << "[conv] Start convolution_example" << std::endl;
+
     // Create execution dnnl::engine.
     dnnl::engine engine(engine_kind, 0);
+        std::cout << "[conv] Engine created" << std::endl;
 
     // Create dnnl::stream.
     dnnl::stream engine_stream(engine);
+        std::cout << "[conv] Stream created" << std::endl;
 
     // Tensor dimensions.
     const memory::dim N = 3, // batch size
-            IC = 32, // input channels
             IH = 13, // input height
             IW = 13, // input width
-            OC = 64, // output channels
+            IC = 32, // input channels
             KH = 3, // weights height
             KW = 3, // weights width
+            OC = 64, // output channels
             PH_L = 1, // height padding: left
             PH_R = 1, // height padding: right
             PW_L = 1, // width padding: left
@@ -69,11 +73,16 @@ void convolution_example(dnnl::engine::kind engine_kind) {
 
     // Source (src), weights, bias, and destination (dst) tensors
     // dimensions.
-    memory::dims src_dims = {N, IC, IH, IW};
-    memory::dims weights_dims = {OC, IC, KH, KW};
+    memory::dims src_dims = {N, IH, IW, IC, };
+    memory::dims weights_dims = {OC, KH, KW, IC};
     // To simulate an empty bias use an empty initializer `{}`.
     memory::dims bias_dims = {OC};
-    memory::dims dst_dims = {N, OC, OH, OW};
+    memory::dims dst_dims = {N, OH, OW, OC};
+
+    // Primitive logical dimensions use canonical convolution ordering.
+    memory::dims conv_src_dims = {N, IC, IH, IW};
+    memory::dims conv_weights_dims = {OC, IC, KH, KW};
+    memory::dims conv_dst_dims = {N, OC, OH, OW};
 
     // Strides, padding dimensions.
     memory::dims strides_dims = {SH, SW};
@@ -85,6 +94,7 @@ void convolution_example(dnnl::engine::kind engine_kind) {
     std::vector<float> weights_data(product(weights_dims));
     std::vector<float> bias_data(product(bias_dims));
     std::vector<float> dst_data(product(dst_dims));
+        std::cout << "[conv] Buffers allocated" << std::endl;
 
     // Initialize src, weights, and dst tensors.
     std::generate(src_data.begin(), src_data.end(), []() {
@@ -99,29 +109,31 @@ void convolution_example(dnnl::engine::kind engine_kind) {
         static int i = 0;
         return std::tanh(float(i++));
     });
+        std::cout << "[conv] Input data initialized" << std::endl;
 
     // Create memory objects for tensor data (src, weights, dst). In this
-    // example, NCHW layout is assumed for src and dst, and OIHW for weights.
+    // example, NHWC layout is assumed for src and dst, and OHWI for weights.
     auto user_src_mem = memory(
-            {src_dims, memory::data_type::f32, memory::format_tag::nchw},
+            {src_dims, memory::data_type::f32, memory::format_tag::nhwc},
             engine);
     auto user_weights_mem = memory(
-            {weights_dims, memory::data_type::f32, memory::format_tag::oihw},
+            {weights_dims, memory::data_type::f32, memory::format_tag::ohwi},
             engine);
     auto user_dst_mem = memory(
-            {dst_dims, memory::data_type::f32, memory::format_tag::nchw},
+            {dst_dims, memory::data_type::f32, memory::format_tag::nhwc},
             engine);
+        std::cout << "[conv] User memory objects created" << std::endl;
 
     // Create memory descriptors with format_tag::any for the primitive. This
     // enables the convolution primitive to choose memory layouts for an
     // optimized primitive implementation, and these layouts may differ from the
     // ones provided by the user.
     auto conv_src_md = memory::desc(
-            src_dims, memory::data_type::f32, memory::format_tag::any);
+            conv_src_dims, memory::data_type::f32, memory::format_tag::any);
     auto conv_weights_md = memory::desc(
-            weights_dims, memory::data_type::f32, memory::format_tag::any);
+            conv_weights_dims, memory::data_type::f32, memory::format_tag::any);
     auto conv_dst_md = memory::desc(
-            dst_dims, memory::data_type::f32, memory::format_tag::any);
+            conv_dst_dims, memory::data_type::f32, memory::format_tag::any);
 
     // Create memory descriptor and memory object for input bias.
     auto user_bias_md = bias_dims.empty()
@@ -129,12 +141,14 @@ void convolution_example(dnnl::engine::kind engine_kind) {
             : memory::desc(
                       bias_dims, memory::data_type::f32, memory::format_tag::a);
     auto user_bias_mem = memory(user_bias_md, engine);
+        std::cout << "[conv] Bias memory prepared" << std::endl;
 
     // Write data to memory object's handle.
     write_to_dnnl_memory(src_data.data(), user_src_mem);
     write_to_dnnl_memory(weights_data.data(), user_weights_mem);
     if (!bias_dims.empty())
         write_to_dnnl_memory(bias_data.data(), user_bias_mem);
+        std::cout << "[conv] Data written to dnnl memory" << std::endl;
 
     // Create primitive post-ops (ReLU).
     const float alpha = 0.f;
@@ -143,12 +157,14 @@ void convolution_example(dnnl::engine::kind engine_kind) {
     conv_ops.append_eltwise(algorithm::eltwise_relu, alpha, beta);
     primitive_attr conv_attr;
     conv_attr.set_post_ops(conv_ops);
+        std::cout << "[conv] Primitive attributes created" << std::endl;
 
     // Create primitive descriptor.
     auto conv_pd = convolution_forward::primitive_desc(engine,
             prop_kind::forward_training, algorithm::convolution_direct,
             conv_src_md, conv_weights_md, user_bias_md, conv_dst_md,
             strides_dims, padding_dims_l, padding_dims_r, conv_attr);
+        std::cout << "[conv] Primitive descriptor created" << std::endl;
 
     // For now, assume that the src, weights, and dst memory layouts generated
     // by the primitive and the ones provided by the user are identical.
@@ -165,20 +181,24 @@ void convolution_example(dnnl::engine::kind engine_kind) {
         conv_src_mem = memory(conv_pd.src_desc(), engine);
         reorder(user_src_mem, conv_src_mem)
                 .execute(engine_stream, user_src_mem, conv_src_mem);
+                std::cout << "[conv] Source reordered" << std::endl;
     }
 
     if (conv_pd.weights_desc() != user_weights_mem.get_desc()) {
         conv_weights_mem = memory(conv_pd.weights_desc(), engine);
         reorder(user_weights_mem, conv_weights_mem)
                 .execute(engine_stream, user_weights_mem, conv_weights_mem);
+                std::cout << "[conv] Weights reordered" << std::endl;
     }
 
     if (conv_pd.dst_desc() != user_dst_mem.get_desc()) {
         conv_dst_mem = memory(conv_pd.dst_desc(), engine);
+                std::cout << "[conv] Destination memory adjusted for primitive" << std::endl;
     }
 
     // Create the primitive.
     auto conv_prim = convolution_forward(conv_pd);
+        std::cout << "[conv] Primitive created" << std::endl;
 
     // Primitive arguments.
     std::unordered_map<int, memory> conv_args;
@@ -186,32 +206,41 @@ void convolution_example(dnnl::engine::kind engine_kind) {
     conv_args.insert({DNNL_ARG_WEIGHTS, conv_weights_mem});
     conv_args.insert({DNNL_ARG_BIAS, user_bias_mem});
     conv_args.insert({DNNL_ARG_DST, conv_dst_mem});
+        std::cout << "[conv] Primitive arguments prepared" << std::endl;
 
     // Primitive execution: convolution with ReLU.
     conv_prim.execute(engine_stream, conv_args);
+        std::cout << "[conv] Primitive executed" << std::endl;
 
     // Reorder the data in case the dst memory descriptor generated by the
     // primitive and the one provided by the user are different.
     if (conv_pd.dst_desc() != user_dst_mem.get_desc()) {
         reorder(conv_dst_mem, user_dst_mem)
                 .execute(engine_stream, conv_dst_mem, user_dst_mem);
+                std::cout << "[conv] Destination reordered back to user layout" << std::endl;
     } else
         user_dst_mem = conv_dst_mem;
 
     // Wait for the computation to finalize.
     engine_stream.wait();
+        std::cout << "[conv] Stream wait completed" << std::endl;
 
     // Read data from memory object's handle.
     read_from_dnnl_memory(dst_data.data(), user_dst_mem);
+        std::cout << "[conv] Output read complete" << std::endl;
 }
 
 void depthwise_convolution_example(dnnl::engine::kind engine_kind) {
 
+        std::cout << "[dwconv] Start depthwise_convolution_example" << std::endl;
+
     // Create execution dnnl::engine.
     dnnl::engine engine(engine_kind, 0);
+        std::cout << "[dwconv] Engine created" << std::endl;
 
     // Create dnnl::stream.
     dnnl::stream engine_stream(engine);
+        std::cout << "[dwconv] Stream created" << std::endl;
 
     // Tensor dimensions.
     const memory::dim N = 3, // batch size
@@ -232,10 +261,15 @@ void depthwise_convolution_example(dnnl::engine::kind engine_kind) {
             OW = (IW - KW + PW_L + PW_R) / SW + 1; // output width
 
     // Source (src), weights, bias, and destination (dst) tensors dimensions.
-    memory::dims src_dims = {N, IC, IH, IW};
-    memory::dims weights_dims = {G, OC / G, IC / G, KH, KW};
+    memory::dims src_dims = {N, IH, IW, IC};
+    memory::dims weights_dims = {G, KH, KW, IC / G, OC / G};
     memory::dims bias_dims = {OC};
-    memory::dims dst_dims = {N, OC, OH, OW};
+    memory::dims dst_dims = {N, OH, OW, OC};
+
+    // Primitive logical dimensions use canonical grouped convolution ordering.
+    memory::dims conv_src_dims = {N, IC, IH, IW};
+    memory::dims conv_weights_dims = {G, OC / G, IC / G, KH, KW};
+    memory::dims conv_dst_dims = {N, OC, OH, OW};
 
     // Strides, padding dimensions.
     memory::dims strides_dims = {SH, SW};
@@ -247,6 +281,7 @@ void depthwise_convolution_example(dnnl::engine::kind engine_kind) {
     std::vector<float> weights_data(product(weights_dims));
     std::vector<float> bias_data(OC);
     std::vector<float> dst_data(product(dst_dims));
+        std::cout << "[dwconv] Buffers allocated" << std::endl;
 
     // Initialize src, weights, and dst tensors.
     std::generate(src_data.begin(), src_data.end(), []() {
@@ -261,39 +296,43 @@ void depthwise_convolution_example(dnnl::engine::kind engine_kind) {
         static int i = 0;
         return std::tanh(float(i++));
     });
+        std::cout << "[dwconv] Input data initialized" << std::endl;
 
     // Create memory objects for tensor data (src, weights, dst). In this
-    // example, NCHW layout is assumed for src and dst, and OIHW for weights.
+    // example, NHWC layout is assumed for src and dst, and OHWI for weights.
     auto user_src_mem = memory(
-            {src_dims, memory::data_type::f32, memory::format_tag::nchw},
+            {src_dims, memory::data_type::f32, memory::format_tag::nhwc},
             engine);
     auto user_weights_mem = memory(
-            {weights_dims, memory::data_type::f32, memory::format_tag::goihw},
+            {weights_dims, memory::data_type::f32, memory::format_tag::gohwi},
             engine);
     auto user_dst_mem = memory(
-            {dst_dims, memory::data_type::f32, memory::format_tag::nchw},
+            {dst_dims, memory::data_type::f32, memory::format_tag::nhwc},
             engine);
+        std::cout << "[dwconv] User memory objects created" << std::endl;
 
     // Create memory descriptors with format_tag::any for the primitive. This
     // enables the convolution primitive to choose memory layouts for an
     // optimized primitive implementation, and these layouts may differ from the
     // ones provided by the user.
     auto conv_src_md = memory::desc(
-            src_dims, memory::data_type::f32, memory::format_tag::any);
+            conv_src_dims, memory::data_type::f32, memory::format_tag::any);
     auto conv_weights_md = memory::desc(
-            weights_dims, memory::data_type::f32, memory::format_tag::any);
+            conv_weights_dims, memory::data_type::f32, memory::format_tag::any);
     auto conv_dst_md = memory::desc(
-            dst_dims, memory::data_type::f32, memory::format_tag::any);
+            conv_dst_dims, memory::data_type::f32, memory::format_tag::any);
 
     // Create memory descriptor and memory object for input bias.
     auto user_bias_md = memory::desc(
             bias_dims, memory::data_type::f32, memory::format_tag::a);
     auto user_bias_mem = memory(user_bias_md, engine);
+    std::cout << "[dwconv] Bias memory prepared" << std::endl;
 
     // Write data to memory object's handle.
     write_to_dnnl_memory(src_data.data(), user_src_mem);
     write_to_dnnl_memory(weights_data.data(), user_weights_mem);
     write_to_dnnl_memory(bias_data.data(), user_bias_mem);
+        std::cout << "[dwconv] Data written to dnnl memory" << std::endl;
 
     // Create primitive post-ops (ReLU).
     const float alpha = 0.f;
@@ -302,12 +341,14 @@ void depthwise_convolution_example(dnnl::engine::kind engine_kind) {
     conv_ops.append_eltwise(algorithm::eltwise_relu, alpha, beta);
     primitive_attr conv_attr;
     conv_attr.set_post_ops(conv_ops);
+        std::cout << "[dwconv] Primitive attributes created" << std::endl;
 
     // Create primitive descriptor.
     auto conv_pd = convolution_forward::primitive_desc(engine,
             prop_kind::forward_training, algorithm::convolution_direct,
             conv_src_md, conv_weights_md, user_bias_md, conv_dst_md,
             strides_dims, padding_dims_l, padding_dims_r, conv_attr);
+        std::cout << "[dwconv] Primitive descriptor created" << std::endl;
 
     // For now, assume that the src, weights, and dst memory layouts generated
     // by the primitive and the ones provided by the user are identical.
@@ -324,20 +365,24 @@ void depthwise_convolution_example(dnnl::engine::kind engine_kind) {
         conv_src_mem = memory(conv_pd.src_desc(), engine);
         reorder(user_src_mem, conv_src_mem)
                 .execute(engine_stream, user_src_mem, conv_src_mem);
+                std::cout << "[dwconv] Source reordered" << std::endl;
     }
 
     if (conv_pd.weights_desc() != user_weights_mem.get_desc()) {
         conv_weights_mem = memory(conv_pd.weights_desc(), engine);
         reorder(user_weights_mem, conv_weights_mem)
                 .execute(engine_stream, user_weights_mem, conv_weights_mem);
+                std::cout << "[dwconv] Weights reordered" << std::endl;
     }
 
     if (conv_pd.dst_desc() != user_dst_mem.get_desc()) {
         conv_dst_mem = memory(conv_pd.dst_desc(), engine);
+                std::cout << "[dwconv] Destination memory adjusted for primitive" << std::endl;
     }
 
     // Create the primitive.
     auto conv_prim = convolution_forward(conv_pd);
+        std::cout << "[dwconv] Primitive created" << std::endl;
 
     // Primitive arguments.
     std::unordered_map<int, memory> conv_args;
@@ -345,30 +390,37 @@ void depthwise_convolution_example(dnnl::engine::kind engine_kind) {
     conv_args.insert({DNNL_ARG_WEIGHTS, conv_weights_mem});
     conv_args.insert({DNNL_ARG_BIAS, user_bias_mem});
     conv_args.insert({DNNL_ARG_DST, conv_dst_mem});
+        std::cout << "[dwconv] Primitive arguments prepared" << std::endl;
 
     // Primitive execution: convolution with ReLU.
     conv_prim.execute(engine_stream, conv_args);
+        std::cout << "[dwconv] Primitive executed" << std::endl;
 
     // Reorder the data in case the dst memory descriptor generated by the
     // primitive and the one provided by the user are different.
     if (conv_pd.dst_desc() != user_dst_mem.get_desc()) {
         reorder(conv_dst_mem, user_dst_mem)
                 .execute(engine_stream, conv_dst_mem, user_dst_mem);
+                std::cout << "[dwconv] Destination reordered back to user layout" << std::endl;
     } else
         user_dst_mem = conv_dst_mem;
 
     // Wait for the computation to finalize.
     engine_stream.wait();
+        std::cout << "[dwconv] Stream wait completed" << std::endl;
 
     // Read data from memory object's handle.
     read_from_dnnl_memory(dst_data.data(), user_dst_mem);
+        std::cout << "[dwconv] Output read complete" << std::endl;
 }
 
 int main(int argc, char **argv) {
+        std::cout << "[main] Running convolution_example" << std::endl;
     auto exit_code = handle_example_errors(
             convolution_example, parse_engine_kind(argc, argv));
     if (exit_code != 0) return exit_code;
 
+        std::cout << "[main] Running depthwise_convolution_example" << std::endl;
     return handle_example_errors(
             depthwise_convolution_example, parse_engine_kind(argc, argv));
 }
