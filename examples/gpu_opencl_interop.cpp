@@ -147,7 +147,6 @@ void gpu_opencl_interop_tutorial() {
     /// @snippet  gpu_opencl_interop.cpp memory alloc
     //  [memory alloc]
     memory::dims tz_dims = {2, 3, 4, 5};
-    //????
     const size_t N = std::accumulate(tz_dims.begin(), tz_dims.end(), (size_t)1,
             std::multiplies<size_t>());
 

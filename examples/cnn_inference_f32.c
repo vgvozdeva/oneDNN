@@ -186,8 +186,6 @@ void simple_net(dnnl_engine_kind_t engine_kind) {
     init_net_data(net_src, ndims, net_src_sizes);
     memset(net_dst, 0, product(net_dst_sizes, ndims) * sizeof(float));
 
-
-
     // AlexNet: conv
     // {BATCH, IC, CONV_IH, CONV_IW} (x) {OC, IC, 11, 11} ->
     // {BATCH, OC, CONV_OH, CONV_OW}
