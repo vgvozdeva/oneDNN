@@ -465,7 +465,7 @@ void simple_net(engine::kind engine_kind) {
     while (n_iter) {
         // forward
         for (size_t i = 0; i < net_fwd.size(); ++i)
-            net_fwd.at(i).execute(s, net_fwd_args.at(i));
+            net_fwd.at(i).execute(s, net_fwd_args.at(i)); //check
 
         // update net_diff_dst
         // auto net_output = pool_user_dst_memory.get_data_handle();
