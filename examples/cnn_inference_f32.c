@@ -79,15 +79,17 @@ static void init_net_data(float *data, uint32_t dim, const dnnl_dim_t *dims) {
             data[i] = (float)(i % 1637);
         }
     } else if (dim == 4) {
-        for (dnnl_dim_t in = 0; in < dims[0]; ++in)
-            for (dnnl_dim_t ic = 0; ic < dims[1]; ++ic)
-                for (dnnl_dim_t ih = 0; ih < dims[2]; ++ih)
-                    for (dnnl_dim_t iw = 0; iw < dims[3]; ++iw) {
-                        dnnl_dim_t indx = in * dims[1] * dims[2] * dims[3]
-                                + ic * dims[2] * dims[3] + ih * dims[3] + iw;
-                        data[indx] = (float)(indx % 1637);
-                    }
-    }
+      for (dnnl_dim_t in = 0; in < dims[0]; ++in)
+        for (dnnl_dim_t ih = 0; ih < dims[2]; ++ih)
+            for (dnnl_dim_t iw = 0; iw < dims[3]; ++iw)
+                for (dnnl_dim_t ic = 0; ic < dims[1]; ++ic) {
+
+                    dnnl_dim_t indx =
+                        in * dims[2] * dims[3] * dims[1] 
+                        + ih * dims[3] * dims[1] + iw * dims[1] + ic;
+                    data[indx] = (float)(indx % 1637);
+                }
+        }
 }
 
 typedef struct {
