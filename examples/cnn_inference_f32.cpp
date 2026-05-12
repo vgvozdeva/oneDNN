@@ -91,12 +91,12 @@ void simple_net(engine::kind engine_kind, int times = 100) {
     //[Allocate buffers]
 
     /// Create memory that describes data layout in the buffers. This example
-    /// uses dnnl::memory::format_tag::nchw (batch-channels-height-width)
+    /// uses dnnl::memory::format_tag::nhwc (batch-channels-height-width)
     /// for input data and dnnl::memory::format_tag::oihw for weights.
     /// @snippet cnn_inference_f32.cpp Create user memory
     //[Create user memory]
     auto user_src_memory = memory(
-            {{conv1_src_tz}, memory::data_type::f32, memory::format_tag::nchw},
+            {{conv1_src_tz}, memory::data_type::f32, memory::format_tag::nhwc},
             eng);
     write_to_dnnl_memory(user_src.data(), user_src_memory);
     auto user_weights_memory
