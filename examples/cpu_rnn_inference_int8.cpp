@@ -141,10 +141,8 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
     auto wei_s8_mem = memory(wei_s8_md, eng, weights_src_layer);
     auto dst_s32_mem = memory(dst_s32_md, eng, weighted_src_layer.data());
 
-    std::unordered_map<int, memory> matmul_int8_args;
-    matmul_int8_args.insert({DNNL_ARG_SRC, src_u8_mem});
-    matmul_int8_args.insert({DNNL_ARG_WEIGHTS, wei_s8_mem});
-    matmul_int8_args.insert({DNNL_ARG_DST, dst_s32_mem});
+    std::unordered_map<int, memory> matmul_int8_args {{DNNL_ARG_SRC, src_u8_mem},
+            {DNNL_ARG_WEIGHTS, wei_s8_mem}, {DNNL_ARG_DST, dst_s32_mem}};
     matmul_int8_prim.execute(engine_stream, matmul_int8_args);
     engine_stream.wait();
     // then we compute the alignment model
