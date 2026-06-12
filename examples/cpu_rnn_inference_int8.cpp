@@ -93,10 +93,8 @@ void compute_weighted_annotations(float *weighted_annotations,
     auto matmul_pd = matmul::primitive_desc(eng, src_md, wei_md, dst_md);
     auto matmul_prim = matmul(matmul_pd);
 
-    std::unordered_map<int, memory> matmul_args;
-    matmul_args.insert({DNNL_ARG_SRC, src_mem});
-    matmul_args.insert({DNNL_ARG_WEIGHTS, wei_mem});
-    matmul_args.insert({DNNL_ARG_DST, dst_mem});
+    std::unordered_map<int, memory> matmul_args {{DNNL_ARG_SRC, src_mem},
+            {DNNL_ARG_WEIGHTS, wei_mem}, {DNNL_ARG_DST, dst_mem}};
     matmul_prim.execute(engine_stream, matmul_args);
     engine_stream.wait();
 }
