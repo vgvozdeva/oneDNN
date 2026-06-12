@@ -69,14 +69,14 @@ std::vector<float> alignment_model(
 std::vector<float> alignments(src_seq_length_max *batch, 1.0f);
 std::vector<float> exp_sums(batch, 1.0f);
 
- 
 void compute_weighted_annotations(float *weighted_annotations,
         dim_t src_seq_length_max, dim_t batch, dim_t feature_size,
-        float *weights_annot, float *annotations, engine &eng,
+        float *weights_annot, float *annotations, const engine &eng,
         stream &engine_stream) {
 
-    const dim_t M = src_seq_length_max * batch, K = feature_size,
-                N = feature_size;
+    const dim_t M = src_seq_length_max * batch;
+    const dim_t K = feature_size;
+    const dim_t N = feature_size;
 
     // descriptors (row-major!)
     auto src_md = memory::desc(
