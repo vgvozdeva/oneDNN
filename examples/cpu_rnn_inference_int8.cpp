@@ -73,7 +73,7 @@ std::vector<float> exp_sums(batch, 1.0f);
 void compute_weighted_annotations(float *weighted_annotations,
         dim_t src_seq_length_max, dim_t batch, dim_t feature_size,
         float *weights_annot, float *annotations, engine &eng,
-         stream &engine_stream) {
+        stream &engine_stream) {
 
     const dim_t M = src_seq_length_max * batch, K = feature_size,
                 N = feature_size;
@@ -822,7 +822,7 @@ void simple_net() {
     auto matmul_int8_prim = matmul(matmul::primitive_desc(
             cpu_engine, att_src_u8_md, att_wei_s8_md, att_dst_s32_md));
 
-   auto att_src_gemv_md
+    auto att_src_gemv_md
             = memory::desc({num_weighted_annotations, feature_size},
                     memory::data_type::f32, memory::format_tag::ab);
     auto att_wei_gemv_md = memory::desc(
@@ -898,7 +898,7 @@ void simple_net() {
                     src_att_layer_handle, data_scale, data_shift,
                     (uint8_t *)enc_bidir_dst_layer_memory.get_data_handle(),
                     weighted_annotations.data(), user_weights_alignments.data(),
-+                   matmul_int8_prim, matmul_gemv_prim, cpu_engine, s);
+                    matmul_int8_prim, matmul_gemv_prim, cpu_engine, s);
             //[att ctx]
 
             ///
