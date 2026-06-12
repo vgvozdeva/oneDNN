@@ -42,33 +42,33 @@
 #include <math.h>
 #include <numeric>
 #include <string>
- 
+
 #include "oneapi/dnnl/dnnl.hpp"
- 
+
 #include "example_utils.hpp"
- 
+
 using namespace dnnl;
- 
+
 using dim_t = dnnl::memory::dim;
- 
+
 const dim_t batch = 32;
 const dim_t src_seq_length_max = 10;
 const dim_t tgt_seq_length_max = 10;
- 
+
 const dim_t feature_size = 256;
- 
+
 const dim_t enc_bidir_n_layers = 1;
 const dim_t enc_unidir_n_layers = 3;
 const dim_t dec_n_layers = 4;
- 
+
 const int lstm_n_gates = 4;
- 
+
 std::vector<int32_t> weighted_src_layer(batch *feature_size, 1);
 std::vector<float> alignment_model(
         src_seq_length_max *batch *feature_size, 1.0f);
 std::vector<float> alignments(src_seq_length_max *batch, 1.0f);
 std::vector<float> exp_sums(batch, 1.0f);
- 
+
  
 void compute_weighted_annotations(
         float *weighted_annotations,
@@ -108,8 +108,7 @@ void compute_weighted_annotations(
  
     engine_stream.wait();
 }
- 
- 
+
 void compute_sum_of_rows(
         int8_t *a, dim_t rows, dim_t cols, int32_t *a_reduced) {
     PRAGMA_OMP_PARALLEL_FOR_COLLAPSE(1)
@@ -120,7 +119,7 @@ void compute_sum_of_rows(
         }
     }
 }
- 
+
 void compute_attention(float *context_vectors, dim_t src_seq_length_max,
         dim_t batch, dim_t feature_size, int8_t *weights_src_layer,
         float weights_src_layer_scale, int32_t *compensation,
@@ -176,7 +175,7 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
             }
         }
     }
- 
+
     // gemv with alignments weights. the resulting alignments are in alignments
     const dim_t num_weighted_annotations = src_seq_length_max * batch;
     auto src_gemv_md = memory::desc({num_weighted_annotations, feature_size},
@@ -188,7 +187,7 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
     auto src_gemv_mem = memory(src_gemv_md, eng, alignment_model_ptr);
     auto wei_gemv_mem = memory(wei_gemv_md, eng, weights_alignments);
     auto dst_gemv_mem = memory(dst_gemv_md, eng, alignments.data());
-   
+
     std::unordered_map<int, memory> matmul_gemv_args;
     matmul_gemv_args.insert({DNNL_ARG_SRC, src_gemv_mem});
     matmul_gemv_args.insert({DNNL_ARG_WEIGHTS, wei_gemv_mem});
@@ -196,12 +195,12 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
 
     matmul_gemv_prim.execute(engine_stream, matmul_gemv_args);
     engine_stream.wait();
- 
+
     // softmax on alignments. the resulting context weights are in alignments
     PRAGMA_OMP_PARALLEL_FOR_COLLAPSE(1)
     for (dim_t i = 0; i < batch; i++)
         exp_sums[i] = 0.0f;
- 
+
     // For each batch j, in the expression: exp(A_i) / \sum_i exp(A_i)
     // we calculate max_idx t so that A_i <= A_t and calculate the expression as
     //         exp(A_i - A_t) / \sum_i exp(A_i - A_t)
@@ -214,7 +213,7 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
                 max_idx[j] = i;
         }
     }
- 
+
     PRAGMA_OMP_PARALLEL_FOR_COLLAPSE(1)
     for (dim_t j = 0; j < batch; j++) {
         auto max_idx_val = alignments[max_idx[j] * batch + j];
@@ -224,7 +223,7 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
             exp_sums[j] += alignments[i * batch + j];
         }
     }
- 
+
     PRAGMA_OMP_PARALLEL_FOR_COLLAPSE(2)
     for (dim_t i = 0; i < src_seq_length_max; i++)
         for (dim_t j = 0; j < batch; j++)
@@ -237,7 +236,7 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
             context_vectors[i * (feature_size + feature_size) + feature_size
                     + j]
                     = 0.0f;
- 
+
     PRAGMA_OMP_PARALLEL_FOR_COLLAPSE(2)
     for (dim_t i = 0; i < batch; i++)
         for (dim_t j = 0; j < feature_size; j++)
@@ -250,7 +249,7 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
                                    - dec_src_layer_shift)
                                 / dec_src_layer_scale);
 }
- 
+
 void copy_context(
         float *src_iter, dim_t n_layers, dim_t batch, dim_t feature_size) {
     // we copy the context from the first layer to all other layers
@@ -263,7 +262,7 @@ void copy_context(
                         = src_iter[j * (feature_size + feature_size)
                                 + feature_size + i];
 }
- 
+
 void simple_net() {
     ///
     /// Initialize a CPU engine and stream. The last parameter in the call represents
@@ -287,9 +286,9 @@ void simple_net() {
     std::vector<float> net_src(batch * src_seq_length_max * feature_size, 0.1f);
     std::vector<float> net_dst(batch * tgt_seq_length_max * feature_size, 0.1f);
     //[declare net]
- 
+
     // Quantization factors for f32 data
- 
+
     ///
     /// Quantization factors for f32 data
     /// @snippet cpu_rnn_inference_int8.cpp quantize
@@ -308,7 +307,7 @@ void simple_net() {
     std::fill(
             weights_scales.begin() + scales_half, weights_scales.end(), 65.5f);
     //[quantize]
- 
+
     ///
     /// **Encoder**
     ///
@@ -329,12 +328,12 @@ void simple_net() {
             = {src_seq_length_max, batch, 2 * feature_size};
  
     //[Initialize encoder memory]
- 
+
     ///
     ///
     /// Encoder: 1 bidirectional layer and 7 unidirectional layers
     ///
- 
+
     std::vector<float> user_enc_bidir_wei_layer(
             enc_bidir_n_layers * 2 * feature_size * lstm_n_gates * feature_size,
             0.3f);
@@ -343,7 +342,7 @@ void simple_net() {
             0.2f);
     std::vector<float> user_enc_bidir_bias(
             enc_bidir_n_layers * 2 * lstm_n_gates * feature_size, 1.0f);
- 
+
     ///
     /// Create the memory for user data
     /// @snippet cpu_rnn_inference_int8.cpp data memory creation
@@ -389,10 +388,10 @@ void simple_net() {
     auto enc_bidir_dst_layer_md = memory::desc({enc_bidir_dst_layer_tz},
             memory::data_type::u8, memory::format_tag::any);
     //[memory desc for RNN data]
- 
+
     ///
     /// Create bidirectional RNN
- 
+
     ///
     /// Define RNN attributes that store quantization parameters
     /// @snippet cpu_rnn_inference_int8.cpp RNN attri
@@ -401,7 +400,7 @@ void simple_net() {
     primitive_attr attr;
     attr.set_rnn_data_qparams(data_scale, data_shift);
     attr.set_rnn_weights_qparams(weights_scale_mask, weights_scales);
- 
+
     // check if int8 LSTM is supported
     lstm_forward::primitive_desc enc_bidir_prim_desc;
     try {
@@ -421,9 +420,9 @@ void simple_net() {
         // on any other error just re-throw
         throw;
     }
- 
+
     //[RNN attri]
- 
+
     ///
     /// Create memory for input data and use reorders to quantize values to int8
     /// NOTE: same attributes are used when creating RNN primitive and reorders
@@ -439,7 +438,7 @@ void simple_net() {
             {{DNNL_ARG_FROM, user_enc_bidir_src_layer_memory},
                     {DNNL_ARG_TO, enc_bidir_src_layer_memory}});
     //[reorder input data]
- 
+
     auto enc_bidir_wei_layer_memory
             = memory(enc_bidir_prim_desc.weights_layer_desc(), cpu_engine);
     auto enc_bidir_wei_layer_reorder_pd = reorder::primitive_desc(
@@ -472,7 +471,7 @@ void simple_net() {
                     {DNNL_ARG_BIAS, user_enc_bidir_bias_memory},
                     {DNNL_ARG_DST_LAYER, enc_bidir_dst_layer_memory}});
     //[push bi rnn to encoder net]
- 
+
     ///
     /// Encoder: unidirectional layers
     ///
@@ -498,7 +497,7 @@ void simple_net() {
             = {1, 1, lstm_n_gates, feature_size};
     memory::dims enc_uni_first_dst_layer_dims
             = {src_seq_length_max, batch, feature_size};
- 
+
     auto user_enc_uni_first_wei_layer_md
             = memory::desc({user_enc_uni_first_wei_layer_dims},
                     memory::data_type::f32, memory::format_tag::ldigo);
@@ -526,22 +525,22 @@ void simple_net() {
     auto enc_uni_first_dst_layer_md
             = memory::desc({enc_uni_first_dst_layer_dims},
                     memory::data_type::u8, memory::format_tag::any);
- 
+
     ///
     /// Encoder : Create unidirection RNN for first cell
     /// @snippet cpu_rnn_inference_int8.cpp create uni first
     ///
     //[create uni first]
- 
+
     auto enc_uni_first_prim_desc = lstm_forward::primitive_desc(cpu_engine,
             prop_kind::forward_inference,
             rnn_direction::unidirectional_left2right, enc_bidir_dst_layer_md,
             memory::desc(), memory::desc(), enc_uni_first_wei_layer_md,
             enc_uni_first_wei_iter_md, user_enc_uni_first_bias_md,
             enc_uni_first_dst_layer_md, memory::desc(), memory::desc(), attr);
- 
+
     //[create uni first]
- 
+
     auto enc_uni_first_wei_layer_memory
             = memory(enc_uni_first_prim_desc.weights_layer_desc(), cpu_engine);
     reorder(user_enc_uni_first_wei_layer_memory, enc_uni_first_wei_layer_memory)
@@ -556,7 +555,7 @@ void simple_net() {
  
     auto enc_uni_first_dst_layer_memory
             = memory(enc_uni_first_prim_desc.dst_layer_desc(), cpu_engine);
- 
+
     ///
     /// Encoder : add the first unidirectional rnn primitive with related arguments into encoder_net
     /// @snippet cpu_rnn_inference_int8.cpp push first uni rnn to encoder net
@@ -570,7 +569,7 @@ void simple_net() {
                     {DNNL_ARG_BIAS, user_enc_uni_first_bias_memory},
                     {DNNL_ARG_DST_LAYER, enc_uni_first_dst_layer_memory}});
     //[push first uni rnn to encoder net]
- 
+
     ///
     /// Encoder : Remaining unidirectional layers
     /// @snippet cpu_rnn_inference_int8.cpp remaining uni layers
@@ -585,7 +584,7 @@ void simple_net() {
     std::vector<float> user_enc_uni_bias(
             (enc_unidir_n_layers - 1) * 1 * lstm_n_gates * feature_size, 1.0f);
     //[remaining uni layers]
- 
+
     memory::dims user_enc_uni_wei_layer_dims = {(enc_unidir_n_layers - 1), 1,
             feature_size, lstm_n_gates, feature_size};
     memory::dims user_enc_uni_wei_iter_dims = {(enc_unidir_n_layers - 1), 1,
@@ -614,13 +613,13 @@ void simple_net() {
             memory::data_type::s8, memory::format_tag::any);
     auto enc_dst_layer_md = memory::desc({enc_dst_layer_dims},
             memory::data_type::f32, memory::format_tag::any);
- 
+
     ///
     /// Encoder : Create unidirection RNN cell
     /// @snippet cpu_rnn_inference_int8.cpp create uni rnn
     ///
     //[create uni rnn]
- 
+
     auto enc_uni_prim_desc = lstm_forward::primitive_desc(cpu_engine,
             prop_kind::forward_inference,
             rnn_direction::unidirectional_left2right,
@@ -628,7 +627,7 @@ void simple_net() {
             enc_uni_wei_layer_md, enc_uni_wei_iter_md, user_enc_uni_bias_md,
             enc_dst_layer_md, memory::desc(), memory::desc(), attr);
     //[create uni rnn]
- 
+
     auto enc_uni_wei_layer_memory
             = memory(enc_uni_prim_desc.weights_layer_desc(), cpu_engine);
     auto enc_uni_wei_layer_reorder_pd = reorder::primitive_desc(
@@ -643,10 +642,10 @@ void simple_net() {
             user_enc_uni_wei_iter_memory, enc_uni_wei_iter_memory, attr);
     reorder(enc_uni_wei_iter_reorder_pd)
             .execute(s, user_enc_uni_wei_iter_memory, enc_uni_wei_iter_memory);
- 
+
     auto enc_dst_layer_memory
             = memory(enc_uni_prim_desc.dst_layer_desc(), cpu_engine);
- 
+
     ///
     /// Encoder : add the unidirectional rnn primitive with related arguments into encoder_net
     /// @snippet cpu_rnn_inference_int8.cpp push uni rnn to encoder net
@@ -660,7 +659,7 @@ void simple_net() {
                     {DNNL_ARG_BIAS, user_enc_uni_bias_memory},
                     {DNNL_ARG_DST_LAYER, enc_dst_layer_memory}});
     //[push uni rnn to encoder net]
- 
+
     ///
     /// **Decoder with attention mechanism**
     ///
@@ -686,7 +685,7 @@ void simple_net() {
     std::vector<float> user_weights_alignments(feature_size, 1.0f);
     // Buffer to store decoder output for all iterations
     std::vector<uint8_t> dec_dst(tgt_seq_length_max * batch * feature_size, 0);
- 
+
     memory::dims user_dec_wei_layer_dims
             = {dec_n_layers, 1, feature_size, lstm_n_gates, feature_size};
     memory::dims user_dec_wei_iter_dims = {dec_n_layers, 1,
@@ -697,7 +696,7 @@ void simple_net() {
     memory::dims dec_dst_layer_dims = {1, batch, feature_size};
     memory::dims dec_dst_iter_c_dims = {dec_n_layers, 1, batch, feature_size};
     //[dec mem dim]
- 
+
     // We will use the same memory for dec_src_iter and dec_dst_iter
     // However, dec_src_iter has a context vector but not
     // dec_dst_iter.
@@ -717,7 +716,7 @@ void simple_net() {
     memory::dims dec_dst_iter_noctx_dims
             = {dec_n_layers, 1, batch, feature_size};
     //[noctx mem dim]
- 
+
     ///
     /// Decoder : create memory description
     /// Create memory descriptors for RNN data w/o specified layout
@@ -739,7 +738,7 @@ void simple_net() {
     auto dec_dst_iter_c_md = memory::desc({dec_dst_iter_c_dims},
             memory::data_type::f32, memory::format_tag::ldnc);
     //[dec mem desc]
- 
+
     ///
     /// Decoder : Create memory
     /// @snippet cpu_rnn_inference_int8.cpp create dec memory
@@ -756,13 +755,13 @@ void simple_net() {
             = memory(dec_dst_layer_md, cpu_engine, dec_dst.data());
     auto dec_dst_iter_c_memory = memory(dec_dst_iter_c_md, cpu_engine);
     //[create dec memory]
- 
+
     // Create memory descriptors for RNN data w/o specified layout
     auto dec_wei_layer_md = memory::desc({user_dec_wei_layer_dims},
             memory::data_type::s8, memory::format_tag::any);
     auto dec_wei_iter_md = memory::desc({user_dec_wei_iter_dims},
             memory::data_type::s8, memory::format_tag::any);
- 
+
     ///
     /// Decoder : As mentioned above, we create a view without context out of the memory with context.
     /// @snippet cpu_rnn_inference_int8.cpp create noctx mem
@@ -773,14 +772,14 @@ void simple_net() {
     auto dec_dst_iter_noctx_md = dec_dst_iter_md.submemory_desc(
             dec_dst_iter_noctx_dims, {0, 0, 0, 0, 0});
     //[create noctx mem]
- 
+
     auto dec_ctx_prim_desc = lstm_forward::primitive_desc(cpu_engine,
             prop_kind::forward_inference,
             rnn_direction::unidirectional_left2right, dec_src_layer_md,
             dec_dst_iter_md, dec_dst_iter_c_md, dec_wei_layer_md,
             dec_wei_iter_md, user_dec_bias_md, dec_dst_layer_md,
             dec_dst_iter_noctx_md, dec_dst_iter_c_md, attr);
- 
+
     ///
     /// Decoder : Create memory for input data and use reorders to quantize values
     /// to int8
@@ -794,14 +793,14 @@ void simple_net() {
     reorder(dec_wei_layer_reorder_pd)
             .execute(s, user_dec_wei_layer_memory, dec_wei_layer_memory);
     //[dec reorder]
- 
+
     auto dec_wei_iter_memory
             = memory(dec_ctx_prim_desc.weights_iter_desc(), cpu_engine);
     auto dec_wei_iter_reorder_pd = reorder::primitive_desc(
             user_dec_wei_iter_memory, dec_wei_iter_memory, attr);
     reorder(dec_wei_iter_reorder_pd)
             .execute(s, user_dec_wei_iter_memory, dec_wei_iter_memory);
- 
+
     decoder_net.push_back(lstm_forward(dec_ctx_prim_desc));
     decoder_net_args.push_back({{DNNL_ARG_SRC_LAYER, dec_src_layer_memory},
             {DNNL_ARG_SRC_ITER, dec_dst_iter_memory},
@@ -812,7 +811,7 @@ void simple_net() {
             {DNNL_ARG_DST_LAYER, dec_dst_layer_memory},
             {DNNL_ARG_DST_ITER, dec_dst_iter_memory},
             {DNNL_ARG_DST_ITER_C, dec_dst_iter_c_memory}});
- 
+
     // Allocating temporary buffers for attention mechanism
     std::vector<float> weighted_annotations(
             src_seq_length_max * batch * feature_size, 1.0f);
@@ -840,11 +839,11 @@ void simple_net() {
             memory::data_type::f32, memory::format_tag::ab);
     auto matmul_gemv_prim = matmul(matmul::primitive_desc(
             cpu_engine, att_src_gemv_md, att_wei_gemv_md, att_dst_gemv_md));
- 
+
     ///
     /// **Execution**
     ///
- 
+
     auto execute = [&]() {
         assert(encoder_net.size() == encoder_net_args.size()
                 && "something is missing");
@@ -856,7 +855,7 @@ void simple_net() {
         for (size_t p = 0; p < encoder_net.size(); ++p)
             encoder_net.at(p).execute(s, encoder_net_args.at(p));
         //[run enc]
- 
+
         // compute the weighted annotations once before the decoder
         ///
         /// we compute the weighted annotations once before the decoder
@@ -877,7 +876,7 @@ void simple_net() {
         compute_sum_of_rows(user_weights_attention_src_layer.data(),
                 feature_size, feature_size, weights_attention_sum_rows.data());
         //[s8u8s32]
- 
+
         ///
         /// We initialize src_layer to the embedding of the end of
         /// sequence character, which are assumed to be 0 here
@@ -887,7 +886,7 @@ void simple_net() {
         memset(dec_src_layer_memory.get_data_handle(), 0,
                 dec_src_layer_memory.get_desc().get_size());
         //[init src_layer]
- 
+
         ///
         /// From now on, src points to the output of the last iteration
         ///
@@ -896,7 +895,7 @@ void simple_net() {
                     = (uint8_t *)dec_src_layer_memory.get_data_handle();
             float *src_att_iter_handle
                     = (float *)dec_dst_iter_memory.get_data_handle();
- 
+
             ///
             /// Compute attention context vector into the first layer src_iter
             /// @snippet cpu_rnn_inference_int8.cpp att ctx
@@ -911,7 +910,7 @@ void simple_net() {
                     user_weights_alignments.data(), matmul_int8_prim,
                     matmul_gemv_prim, cpu_engine, s);
             //[att ctx]
- 
+
             ///
             /// copy the context vectors to all layers of src_iter
             /// @snippet cpu_rnn_inference_int8.cpp cp ctx
@@ -920,7 +919,7 @@ void simple_net() {
             copy_context(
                     src_att_iter_handle, dec_n_layers, batch, feature_size);
             //[cp ctx]
- 
+
             assert(decoder_net.size() == decoder_net_args.size()
                     && "something is missing");
             ///
@@ -931,7 +930,7 @@ void simple_net() {
             for (size_t p = 0; p < decoder_net.size(); ++p)
                 decoder_net.at(p).execute(s, decoder_net_args.at(p));
             //[run dec iter]
- 
+
             ///
             /// Move the handle on the src/dst layer to the next iteration
             /// @snippet cpu_rnn_inference_int8.cpp set handle
@@ -945,7 +944,7 @@ void simple_net() {
             //[set handle]
         }
     };
- 
+
     /// @page cpu_rnn_inference_int8_cpp
     ///
     std::cout << "Parameters:" << std::endl
@@ -961,12 +960,11 @@ void simple_net() {
               << enc_unidir_n_layers << std::endl
               << " number of layers of the decoder = " << dec_n_layers
               << std::endl;
- 
+
     execute();
     s.wait();
 }
- 
+
 int main(int argc, char **argv) {
     return handle_example_errors({engine::kind::cpu}, simple_net);
 }
- 
