@@ -177,11 +177,8 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
     auto wei_gemv_mem = memory(wei_gemv_md, eng, weights_alignments);
     auto dst_gemv_mem = memory(dst_gemv_md, eng, alignments.data());
 
-    std::unordered_map<int, memory> matmul_gemv_args;
-    matmul_gemv_args.insert({DNNL_ARG_SRC, src_gemv_mem});
-    matmul_gemv_args.insert({DNNL_ARG_WEIGHTS, wei_gemv_mem});
-    matmul_gemv_args.insert({DNNL_ARG_DST, dst_gemv_mem});
-
+    std::unordered_map<int, memory> matmul_gemv_args {{DNNL_ARG_SRC, src_gemv_mem},
+            {DNNL_ARG_WEIGHTS, wei_gemv_mem}, {DNNL_ARG_DST, dst_gemv_mem}};
     matmul_gemv_prim.execute(engine_stream, matmul_gemv_args);
     engine_stream.wait();
 
