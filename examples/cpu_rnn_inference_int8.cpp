@@ -119,8 +119,8 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
         const matmul::primitive_desc &matmul_int8_pd,
         const matmul &matmul_int8_prim,
         const matmul::primitive_desc &matmul_gemv_pd,
-        const matmul &matmul_gemv_prim,
-        const engine &eng, stream &engine_stream) {
+        const matmul &matmul_gemv_prim, const engine &eng,
+        stream &engine_stream) {
     // dst_iter : (n, c) matrix
     // src_layer: (n, c) matrix
     // weighted_annotations (t, n, c)
@@ -809,8 +809,8 @@ void simple_net() {
             memory::data_type::s8, memory::format_tag::ab);
     auto att_dst_s32_md = memory::desc({batch, feature_size},
             memory::data_type::s32, memory::format_tag::ab);
-    auto matmul_int8_pd = matmul::primitive_desc(cpu_engine, att_src_u8_md, att_wei_s8_md,
-            att_dst_s32_md);
+    auto matmul_int8_pd = matmul::primitive_desc(
+            cpu_engine, att_src_u8_md,att_wei_s8_md, att_dst_s32_md);
     auto matmul_int8_prim = matmul(matmul_int8_pd);
 
     auto att_src_gemv_md
@@ -820,7 +820,8 @@ void simple_net() {
             {feature_size, 1}, memory::data_type::f32, memory::format_tag::ab);
     auto att_dst_gemv_md = memory::desc({num_weighted_annotations, 1},
             memory::data_type::f32, memory::format_tag::ab);
-    auto matmul_gemv_pd = matmul::primitive_desc(cpu_engine, att_src_gemv_md, att_wei_gemv_md, att_dst_gemv_md);
+    auto matmul_gemv_pd = matmul::primitive_desc(
+            cpu_engine, att_src_gemv_md, att_wei_gemv_md, att_dst_gemv_md);
     auto matmul_gemv_prim = matmul(matmul_gemv_pd);
 
     ///
@@ -889,7 +890,7 @@ void simple_net() {
                     src_att_layer_handle, data_scale, data_shift,
                     (uint8_t *)enc_bidir_dst_layer_memory.get_data_handle(),
                     weighted_annotations.data(), user_weights_alignments.data(),
-                    matmul_int8_pd, matmul_int8_prim, matmul_gemv_pd, 
+                    matmul_int8_pd, matmul_int8_prim, matmul_gemv_pd,
                     matmul_gemv_prim, cpu_engine, s);
             //[att ctx]
 
