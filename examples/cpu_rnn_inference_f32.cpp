@@ -74,7 +74,6 @@ void compute_weighted_annotations(float *weighted_annotations,
         stream &engine_stream) {
     // annotations(aka enc_dst_layer) is (t, n, 2c)
     // weights_annot is (2c, c)
-
     // annotation[i] = GEMM(weights_annot, enc_dst_layer[i]);
    
     const dim_t M = src_seq_length_max * batch;
@@ -108,7 +107,8 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
         float *weights_alignments, const matmul::primitive_desc &matmul_f32_pd,
         const matmul &matmul_f32_prim,
         const matmul::primitive_desc &matmul_gemv_pd,
-        const matmul &matmul_gemv_prim, const engine &eng, stream &engine_stream) {
+        const matmul &matmul_gemv_prim, const engine &eng,
+        stream &engine_stream) {
     // dst_iter : (n, c) matrix
     // src_layer: (n, c) matrix
     // weighted_annotations (t, n, c)
@@ -121,12 +121,14 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
 
     // first we precompute the weighted_dec_src_layer
     auto src_f32_mem = memory(matmul_f32_pd.src_desc(), eng, dec_src_layer);
-    auto wei_f32_mem = memory(matmul_f32_pd.weights_desc(), eng, weights_src_layer);
+    auto wei_f32_mem
+            = memory(matmul_f32_pd.weights_desc(), eng, weights_src_layer);
     auto dst_f32_mem
             = memory(matmul_f32_pd.dst_desc(), eng, weighted_src_layer.data());
 
-    std::unordered_map<int, memory> matmul_f32_args = {{DNNL_ARG_SRC, src_f32_mem},
-           {DNNL_ARG_WEIGHTS, wei_f32_mem}, {DNNL_ARG_DST, dst_f32_mem}};
+    std::unordered_map<int, memory> matmul_f32_args
+            = {{DNNL_ARG_SRC, src_f32_mem}, {DNNL_ARG_WEIGHTS, wei_f32_mem},
+                    {DNNL_ARG_DST, dst_f32_mem}};
     matmul_f32_prim.execute(engine_stream, matmul_f32_args);
     engine_stream.wait();
 
@@ -149,8 +151,9 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
     auto dst_gemv_mem
             = memory(matmul_gemv_pd.dst_desc(), eng, alignments.data());
 
-    std::unordered_map<int, memory> matmul_gemv_args {{DNNL_ARG_SRC, src_gemv_mem},
-            {DNNL_ARG_WEIGHTS, wei_gemv_mem}, {DNNL_ARG_DST, dst_gemv_mem}};
+    std::unordered_map<int, memory> matmul_gemv_args
+            = {{DNNL_ARG_SRC, src_gemv_mem}, {DNNL_ARG_WEIGHTS, wei_gemv_mem},
+                    {DNNL_ARG_DST, dst_gemv_mem}};
     matmul_gemv_prim.execute(engine_stream, matmul_gemv_args);
     engine_stream.wait();
 
@@ -720,10 +723,10 @@ void simple_net() {
     // allocating temporary buffer for attention mechanism
     std::vector<float> weighted_annotations(
             src_seq_length_max * batch * feature_size, 1.0f);
-   // Create the attention matmul primitives once and reuse them across all
+    // Create the attention matmul primitives once and reuse them across all
     // decoder iterations, instead of rebuilding them on every call to
     // compute_attention.
-        dim_t num_weighted_annotations = src_seq_length_max * batch;
+    dim_t num_weighted_annotations = src_seq_length_max * batch;
 
     auto att_src_f32_md = memory::desc({batch, feature_size},
             memory::data_type::f32, memory::format_tag::ab);
