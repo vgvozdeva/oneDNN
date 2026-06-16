@@ -117,7 +117,7 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
         float dec_src_layer_shift, uint8_t *annotations,
         float *weighted_annotations, float *weights_alignments,
         const matmul &matmul_int8_prim, const matmul &matmul_gemv_prim,
-        engine &eng, stream &engine_stream) {
+        const engine &eng, stream &engine_stream) {
     // dst_iter : (n, c) matrix
     // src_layer: (n, c) matrix
     // weighted_annotations (t, n, c)
