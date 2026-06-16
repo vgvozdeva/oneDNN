@@ -96,10 +96,8 @@ void compute_weighted_annotations(float *weighted_annotations,
     auto matmul_pd = matmul::primitive_desc(eng, src_md, wei_md, dst_md);
     auto matmul_prim = matmul(matmul_pd);
 
-    std::unordered_map<int, memory> matmul_args;
-    matmul_args.insert({DNNL_ARG_SRC, src_mem});
-    matmul_args.insert({DNNL_ARG_WEIGHTS, wei_mem});
-    matmul_args.insert({DNNL_ARG_DST, dst_mem});
+    std::unordered_map<int, memory> matmul_args {{DNNL_ARG_SRC, src_mem},
+            {DNNL_ARG_WEIGHTS, wei_mem}, {DNNL_ARG_DST, dst_mem}};
     matmul_prim.execute(engine_stream, matmul_args);
     engine_stream.wait();
 }
@@ -110,7 +108,7 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
         float *weights_alignments, const matmul::primitive_desc &matmul_f32_pd,
         const matmul &matmul_f32_prim,
         const matmul::primitive_desc &matmul_gemv_pd,
-        const matmul &matmul_gemv_prim, engine &eng, stream &engine_stream) {
+        const matmul &matmul_gemv_prim, const engine &eng, stream &engine_stream) {
     // dst_iter : (n, c) matrix
     // src_layer: (n, c) matrix
     // weighted_annotations (t, n, c)
@@ -131,7 +129,6 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
            {DNNL_ARG_WEIGHTS, wei_f32_mem}, {DNNL_ARG_DST, dst_f32_mem}};
     matmul_f32_prim.execute(engine_stream, matmul_f32_args);
     engine_stream.wait();
-
 
     // then we compute the alignment model
     float *alignment_model_ptr = alignment_model.data();
