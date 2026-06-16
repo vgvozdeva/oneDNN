@@ -85,7 +85,6 @@ Orphans
     page_cpu_matmul_weights_compression_cpp
     page_cpu_rnn_inference_f32_cpp
     page_cpu_rnn_inference_int8_cpp
-    page_cpu_sgemm_and_matmul_cpp.rst
     page_cross_engine_reorder_c
     page_cross_engine_reorder_cpp
     page_deconvolution_example_cpp.rst
@@ -160,7 +159,6 @@ Orphans
     page_cpu_matmul_weights_compression_cpp_brief.rst
     page_cpu_rnn_inference_f32_cpp_brief.rst
     page_cpu_rnn_inference_int8_cpp_brief.rst
-    page_cpu_sgemm_and_matmul_cpp_brief.rst
     page_cross_engine_reorder_cpp_brief.rst
     page_deconvolution_example_cpp_brief.rst
     page_eltwise_example_cpp_brief.rst
