@@ -28,7 +28,6 @@ Orphans
     example_cpu_matmul_weights_compression.cpp.rst
     example_cpu_rnn_inference_f32.cpp.rst
     example_cpu_rnn_inference_int8.cpp.rst
-    example_cpu_sgemm_and_matmul.cpp.rst
     example_cpu_single_op_partition.cpp.rst
     example_cross_engine_reorder.c.rst
     example_cross_engine_reorder.cpp.rst
