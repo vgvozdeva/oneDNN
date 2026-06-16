@@ -116,7 +116,10 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
         uint8_t *dec_src_layer, float dec_src_layer_scale,
         float dec_src_layer_shift, uint8_t *annotations,
         float *weighted_annotations, float *weights_alignments,
-        const matmul &matmul_int8_prim, const matmul &matmul_gemv_prim,
+        const matmul::primitive_desc &matmul_int8_pd,
+        const matmul &matmul_int8_prim,
+        const matmul::primitive_desc &matmul_gemv_pd,
+        const matmul &matmul_gemv_prim,
         const engine &eng, stream &engine_stream) {
     // dst_iter : (n, c) matrix
     // src_layer: (n, c) matrix
@@ -129,23 +132,19 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
     // p is (n, 1)
 
     // first we precompute the weighted_dec_src_layer
-    auto src_u8_md = memory::desc({batch, feature_size}, memory::data_type::u8,
-            memory::format_tag::ab);
 
-    auto wei_s8_md = memory::desc({feature_size, feature_size},
-            memory::data_type::s8, memory::format_tag::ab);
-    auto dst_s32_md = memory::desc({batch, feature_size},
-            memory::data_type::s32, memory::format_tag::ab);
-
-    auto src_u8_mem = memory(src_u8_md, eng, dec_src_layer);
-    auto wei_s8_mem = memory(wei_s8_md, eng, weights_src_layer);
-    auto dst_s32_mem = memory(dst_s32_md, eng, weighted_src_layer.data());
+    auto src_u8_mem = memory(matmul_int8_pd.src_desc(), eng, dec_src_layer);
+    auto wei_s8_mem
+            = memory(matmul_int8_pd.weights_desc(), eng, weights_src_layer);
+    auto dst_s32_mem
+            = memory(matmul_int8_pd.dst_desc(), eng, weighted_src_layer.data());
 
     std::unordered_map<int, memory> matmul_int8_args
             = {{DNNL_ARG_SRC, src_u8_mem}, {DNNL_ARG_WEIGHTS, wei_s8_mem},
                     {DNNL_ARG_DST, dst_s32_mem}};
     matmul_int8_prim.execute(engine_stream, matmul_int8_args);
     engine_stream.wait();
+
     // then we compute the alignment model
     float *alignment_model_ptr = alignment_model.data();
     PRAGMA_OMP_PARALLEL_FOR_COLLAPSE(2)
@@ -165,16 +164,12 @@ void compute_attention(float *context_vectors, dim_t src_seq_length_max,
     }
 
     // gemv with alignments weights. the resulting alignments are in alignments
-    const dim_t num_weighted_annotations = src_seq_length_max * batch;
-    auto src_gemv_md = memory::desc({num_weighted_annotations, feature_size},
-            memory::data_type::f32, memory::format_tag::ab);
-    auto wei_gemv_md = memory::desc(
-            {feature_size, 1}, memory::data_type::f32, memory::format_tag::ab);
-    auto dst_gemv_md = memory::desc({num_weighted_annotations, 1},
-            memory::data_type::f32, memory::format_tag::ab);
-    auto src_gemv_mem = memory(src_gemv_md, eng, alignment_model_ptr);
-    auto wei_gemv_mem = memory(wei_gemv_md, eng, weights_alignments);
-    auto dst_gemv_mem = memory(dst_gemv_md, eng, alignments.data());
+    auto src_gemv_mem
+            = memory(matmul_gemv_pd.src_desc(), eng, alignment_model_ptr);
+    auto wei_gemv_mem
+            = memory(matmul_gemv_pd.weights_desc(), eng, weights_alignments);
+    auto dst_gemv_mem
+            = memory(matmul_gemv_pd.dst_desc(), eng, alignments.data());
 
     std::unordered_map<int, memory> matmul_gemv_args
             = {{DNNL_ARG_SRC, src_gemv_mem}, {DNNL_ARG_WEIGHTS, wei_gemv_mem},
@@ -814,8 +809,9 @@ void simple_net() {
             memory::data_type::s8, memory::format_tag::ab);
     auto att_dst_s32_md = memory::desc({batch, feature_size},
             memory::data_type::s32, memory::format_tag::ab);
-    auto matmul_int8_prim = matmul(matmul::primitive_desc(
-            cpu_engine, att_src_u8_md, att_wei_s8_md, att_dst_s32_md));
+    auto matmul_int8_pd = matmul::primitive_desc(cpu_engine, att_src_u8_md, att_wei_s8_md,
+            att_dst_s32_md);
+    auto matmul_int8_prim = matmul(matmul_int8_pd);
 
     auto att_src_gemv_md
             = memory::desc({num_weighted_annotations, feature_size},
@@ -824,8 +820,8 @@ void simple_net() {
             {feature_size, 1}, memory::data_type::f32, memory::format_tag::ab);
     auto att_dst_gemv_md = memory::desc({num_weighted_annotations, 1},
             memory::data_type::f32, memory::format_tag::ab);
-    auto matmul_gemv_prim = matmul(matmul::primitive_desc(
-            cpu_engine, att_src_gemv_md, att_wei_gemv_md, att_dst_gemv_md));
+    auto matmul_gemv_pd = matmul::primitive_desc(cpu_engine, att_src_gemv_md, att_wei_gemv_md, att_dst_gemv_md);
+    auto matmul_gemv_prim = matmul(matmul_gemv_pd);
 
     ///
     /// **Execution**
@@ -893,7 +889,8 @@ void simple_net() {
                     src_att_layer_handle, data_scale, data_shift,
                     (uint8_t *)enc_bidir_dst_layer_memory.get_data_handle(),
                     weighted_annotations.data(), user_weights_alignments.data(),
-                    matmul_int8_prim, matmul_gemv_prim, cpu_engine, s);
+                    matmul_int8_pd, matmul_int8_prim, matmul_gemv_pd, 
+                    matmul_gemv_prim, cpu_engine, s);
             //[att ctx]
 
             ///
