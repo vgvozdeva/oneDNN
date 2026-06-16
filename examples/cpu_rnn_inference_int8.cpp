@@ -810,7 +810,7 @@ void simple_net() {
     auto att_dst_s32_md = memory::desc({batch, feature_size},
             memory::data_type::s32, memory::format_tag::ab);
     auto matmul_int8_pd = matmul::primitive_desc(
-            cpu_engine, att_src_u8_md,att_wei_s8_md, att_dst_s32_md);
+            cpu_engine, att_src_u8_md, att_wei_s8_md, att_dst_s32_md);
     auto matmul_int8_prim = matmul(matmul_int8_pd);
 
     auto att_src_gemv_md
