@@ -75,7 +75,7 @@ void compute_weighted_annotations(float *weighted_annotations,
     // annotations(aka enc_dst_layer) is (t, n, 2c)
     // weights_annot is (2c, c)
 
-    // annotation[i] = GEMM(weights_annot, enc_dst_layer[i]);   
+    // annotation[i] = GEMM(weights_annot, enc_dst_layer[i]);
     const dim_t M = src_seq_length_max * batch;
     const dim_t K = feature_size;
     const dim_t N = feature_size;
