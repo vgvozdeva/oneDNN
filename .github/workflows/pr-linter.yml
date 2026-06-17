@@ -118,6 +118,24 @@ jobs:
           config: ".github/.licenserc.yml"
           mode: "check"
 
+  pr-check-codespell:
+    name: Codespell Check
+    runs-on: ubuntu-24.04
+    steps:
+    - name: "Checkout code"
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+
+    - name: "Install codespell"
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install codespell
+        
+    - name: "Run codespell"
+      run: |
+        codespell *.* doc -L COO,coo,nD,ND
+
   other-lint:
     name: Other linters
     runs-on: ubuntu-24.04
