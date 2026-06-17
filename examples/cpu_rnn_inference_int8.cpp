@@ -42,6 +42,7 @@
 #include <math.h>
 #include <numeric>
 #include <string>
+#include <unordered_map>
 
 #include "oneapi/dnnl/dnnl.hpp"
 
