@@ -41,17 +41,3 @@ if(NOT EXISTS "${DNNL_ITTAPI_INCLUDE_DIR}/ittnotify/ittnotify.h")
         "Set DNNL_ITTAPI_INCLUDE_DIR to a directory that contains the "
         "'ittnotify/' subdirectory with 'ittnotify.h' and 'jitprofiling.h'.")
 endif()
-
-# When DNNL_ITTAPI_INCLUDE_DIR points to the copy shipped with oneDNN, the
-# bundled sources are compiled into the library (see src/common/CMakeLists.txt).
-# Otherwise an external ITT API is used (headers only) and its symbols are
-# expected to be provided by the enclosing project.
-get_filename_component(_itt_bundled
-    "${PROJECT_SOURCE_DIR}/third_party/ittnotify" ABSOLUTE)
-get_filename_component(_itt_given "${DNNL_ITTAPI_INCLUDE_DIR}" ABSOLUTE)
-
-if(_itt_given STREQUAL _itt_bundled)
-    message(STATUS "ITT API: using bundled copy (${DNNL_ITTAPI_INCLUDE_DIR})")
-else()
-    message(STATUS "ITT API: using external headers (${DNNL_ITTAPI_INCLUDE_DIR})")
-endif()
