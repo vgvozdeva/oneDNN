@@ -41,3 +41,15 @@ if(NOT EXISTS "${DNNL_ITTAPI_INCLUDE_DIR}/ittnotify/ittnotify.h")
         "Set DNNL_ITTAPI_INCLUDE_DIR to a directory that contains the "
         "'ittnotify/' subdirectory with 'ittnotify.h' and 'jitprofiling.h'.")
 endif()
+
+# Report bundled vs external. The actual decision on whether to compile the
+# bundled sources is made (using the same path comparison) in
+# src/common/CMakeLists.txt.
+get_filename_component(_itt_given "${DNNL_ITTAPI_INCLUDE_DIR}" ABSOLUTE)
+get_filename_component(_itt_bundled "${ITTNOTIFY_ROOT}" ABSOLUTE)
+if(_itt_given STREQUAL _itt_bundled)
+    message(STATUS "ITT API: using bundled copy (${DNNL_ITTAPI_INCLUDE_DIR})")
+else()
+    message(STATUS "ITT API: using external headers (${DNNL_ITTAPI_INCLUDE_DIR}); "
+        "the surrounding project must provide the ITT implementation")
+endif()
