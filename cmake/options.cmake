@@ -218,17 +218,12 @@ onednn_option(ENABLE_ITT_TASKS ON
 onednn_option(ITTAPI_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/third_party/ittnotify"
     "Path to the ITT API headers (the directory that contains the
     'ittnotify/' subdirectory with 'ittnotify.h' and 'jitprofiling.h').
-    Defaults to the copy bundled in
-    third_party/ittnotify, whose sources are compiled into the library. Point
-    it to an externally provided ITT API to build against those headers and
-    link the external ITT library (see DNNL_ITTAPI_LIBRARY) instead of the
-    bundled sources. This avoids multiple-definition errors when the enclosing
-    project also links ITT statically.")
-
-onednn_option(ITTAPI_LIBRARY ""
-    "Path to an external ITT (ittnotify) library to link against when
-    DNNL_ITTAPI_INCLUDE_DIR points to external headers. When empty, oneDNN
-    assumes the ITT symbols are provided by the enclosing project.")
+    Defaults to the copy bundled in third_party/ittnotify, whose sources are
+    compiled into the library. Point it to an externally provided ITT API to
+    build against those headers instead of the bundled sources; in that case
+    the ITT symbols are expected to be provided by the enclosing project. This
+    avoids multiple-definition errors when the enclosing project also links ITT
+    statically.")
 
 onednn_option(ENABLE_GRAPH_DUMP ON "Enables saving subgraphs defined using
     Graph API to disk when ONEDNN_GRAPH_DUMP environment variable is set.")

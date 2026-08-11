@@ -21,8 +21,15 @@ file(GLOB SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
     )
 if(DNNL_ENABLE_JIT_PROFILING OR DNNL_ENABLE_ITT_TASKS)
+    # Compile the bundled ITT sources only when DNNL_ITTAPI_INCLUDE_DIR points to
+    # the copy shipped with oneDNN. When it points elsewhere, an external ITT API
+    # is used (headers only) and its symbols are resolved by the enclosing
+    # project, so the bundled sources must not be built to avoid duplicate
+    # definitions.
+    get_filename_component(_itt_given "${DNNL_ITTAPI_INCLUDE_DIR}" ABSOLUTE)
+    get_filename_component(_itt_bundled "${ITTNOTIFY_ROOT}" ABSOLUTE)
     if((DNNL_TARGET_ARCH STREQUAL "AARCH64" OR DNNL_TARGET_ARCH STREQUAL "X64")
-       AND NOT DNNL_USE_EXTERNAL_ITTAPI)
+       AND _itt_given STREQUAL _itt_bundled)
         file(GLOB ITT_SOURCES
             ${ITTNOTIFY_ROOT}/ittnotify/*.c
             )

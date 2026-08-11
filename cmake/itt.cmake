@@ -42,24 +42,16 @@ if(NOT EXISTS "${DNNL_ITTAPI_INCLUDE_DIR}/ittnotify/ittnotify.h")
         "'ittnotify/' subdirectory with 'ittnotify.h' and 'jitprofiling.h'.")
 endif()
 
-# Decide between the bundled copy (sources compiled into the library) and an
-# externally provided ITT API (headers only + external library). The result is
-# exposed via the DNNL_USE_EXTERNAL_ITTAPI cache variable, which gates the
-# compilation of the bundled sources in src/common/CMakeLists.txt.
+# When DNNL_ITTAPI_INCLUDE_DIR points to the copy shipped with oneDNN, the
+# bundled sources are compiled into the library (see src/common/CMakeLists.txt).
+# Otherwise an external ITT API is used (headers only) and its symbols are
+# expected to be provided by the enclosing project.
 get_filename_component(_itt_bundled
     "${PROJECT_SOURCE_DIR}/third_party/ittnotify" ABSOLUTE)
 get_filename_component(_itt_given "${DNNL_ITTAPI_INCLUDE_DIR}" ABSOLUTE)
 
 if(_itt_given STREQUAL _itt_bundled)
-    set(DNNL_USE_EXTERNAL_ITTAPI FALSE CACHE INTERNAL
-        "Use an externally provided ITT API instead of the bundled sources")
     message(STATUS "ITT API: using bundled copy (${DNNL_ITTAPI_INCLUDE_DIR})")
 else()
-    set(DNNL_USE_EXTERNAL_ITTAPI TRUE CACHE INTERNAL
-        "Use an externally provided ITT API instead of the bundled sources")
     message(STATUS "ITT API: using external headers (${DNNL_ITTAPI_INCLUDE_DIR})")
-    if(DNNL_ITTAPI_LIBRARY)
-        message(STATUS "ITT API: linking external library (${DNNL_ITTAPI_LIBRARY})")
-        list(APPEND EXTRA_SHARED_LIBS "${DNNL_ITTAPI_LIBRARY}")
-    endif()
 endif()
