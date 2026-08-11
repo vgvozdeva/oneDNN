@@ -33,7 +33,7 @@
 #endif
 
 #if DNNL_ENABLE_JIT_PROFILING
-#include "jitprofiling.h"
+#include "ittnotify/jitprofiling.h"
 #ifdef __linux__
 #include "cpu/jit_utils/linux_perf/linux_perf.hpp"
 #endif

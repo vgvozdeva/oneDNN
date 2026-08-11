@@ -34,21 +34,20 @@ endif()
 
 file(TO_CMAKE_PATH "${DNNL_ITTAPI_INCLUDE_DIR}" DNNL_ITTAPI_INCLUDE_DIR)
 
-if(NOT EXISTS "${DNNL_ITTAPI_INCLUDE_DIR}/ittnotify.h")
+if(NOT EXISTS "${DNNL_ITTAPI_INCLUDE_DIR}/ittnotify/ittnotify.h")
     message(FATAL_ERROR
-        "ITT API headers not found: '${DNNL_ITTAPI_INCLUDE_DIR}/ittnotify.h' "
-        "does not exist. Set DNNL_ITTAPI_INCLUDE_DIR to a directory that "
-        "directly contains 'ittnotify.h' (and 'jitprofiling.h').")
+        "ITT API headers not found: "
+        "'${DNNL_ITTAPI_INCLUDE_DIR}/ittnotify/ittnotify.h' does not exist. "
+        "Set DNNL_ITTAPI_INCLUDE_DIR to a directory that contains the "
+        "'ittnotify/' subdirectory with 'ittnotify.h' and 'jitprofiling.h'.")
 endif()
-
-include_directories_with_host_compiler(${DNNL_ITTAPI_INCLUDE_DIR})
 
 # Decide between the bundled copy (sources compiled into the library) and an
 # externally provided ITT API (headers only + external library). The result is
 # exposed via the DNNL_USE_EXTERNAL_ITTAPI cache variable, which gates the
 # compilation of the bundled sources in src/common/CMakeLists.txt.
 get_filename_component(_itt_bundled
-    "${PROJECT_SOURCE_DIR}/third_party/ittnotify/ittnotify" ABSOLUTE)
+    "${PROJECT_SOURCE_DIR}/third_party/ittnotify" ABSOLUTE)
 get_filename_component(_itt_given "${DNNL_ITTAPI_INCLUDE_DIR}" ABSOLUTE)
 
 if(_itt_given STREQUAL _itt_bundled)
