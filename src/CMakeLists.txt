@@ -26,7 +26,7 @@ file(GLOB HEADERS_SUBDIR
     )
 
 if(DNNL_ENABLE_JIT_PROFILING OR DNNL_ENABLE_ITT_TASKS)
-    set(ITTNOTIFY_ROOT "${PROJECT_SOURCE_DIR}/third_party/ittnotify")
+    # ITTNOTIFY_ROOT is defined once in cmake/options.cmake (CACHE INTERNAL).
     include_directories_with_host_compiler(${DNNL_ITTAPI_INCLUDE_DIR})
 endif()
 if(DNNL_GPU_VENDOR STREQUAL "INTEL" AND DNNL_GPU_RUNTIME MATCHES "^(OCL|SYCL|DPCPP)$")
