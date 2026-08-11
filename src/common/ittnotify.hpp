@@ -22,9 +22,9 @@
 
 #if defined(DNNL_ENABLE_ITT_TASKS)
 #include "dnnl_debug.h"
-#include "ittnotify/ittnotify.h"
+#include "ittnotify.h"
 #else
-// Forward declaration of the ITT id type defined in ittnotify/ittnotify.h.
+// Forward declaration of the ITT id type defined in ittnotify.h.
 struct ___itt_id; // NOLINT
 typedef struct ___itt_id __itt_id; // NOLINT
 #endif
