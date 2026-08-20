@@ -61,6 +61,8 @@ struct jit_brgemm_kernel_t : public jit_base_brgemm_kernel_t {
 
         bool has_f8_e5m2_binary_postops = false;
         bool has_f8_e4m3_binary_postops = false;
+        bool has_f8_dt = one_of(data_type::f8_e5m2, brg.dt_d, brg.dt_bias)
+                || one_of(data_type::f8_e4m3, brg.dt_d, brg.dt_bias);
         if (brg.with_binary) {
             const auto &post_ops = brg.attr()->post_ops_;
             for (int i = 0; i < post_ops.len(); i++) {
@@ -76,9 +78,9 @@ struct jit_brgemm_kernel_t : public jit_base_brgemm_kernel_t {
         }
 
         if (brg.is_fp8 || has_f8_e5m2_binary_postops
-                || has_f8_e4m3_binary_postops) {
+                || has_f8_e4m3_binary_postops || has_f8_dt) {
             if (one_of(data_type::f8_e5m2, brg.dt_a, brg.dt_b, brg.dt_c,
-                        brg.dt_d)
+                        brg.dt_d, brg.dt_bias)
                     || has_f8_e5m2_binary_postops)
                 // Note: avoid using 'vmm0' since it is used as
                 // 'fp8_to_f16_upconvert()' param and would collision with these
@@ -87,7 +89,7 @@ struct jit_brgemm_kernel_t : public jit_base_brgemm_kernel_t {
                         vmm_fp8_emu_aux1(), vmm_fp8_emu_aux2(),
                         vmm_fp8_emu_aux3(), kmask_fp8_aux, reg64_fp8_aux);
             if (one_of(data_type::f8_e4m3, brg.dt_a, brg.dt_b, brg.dt_c,
-                        brg.dt_d)
+                        brg.dt_d, brg.dt_bias)
                     || has_f8_e4m3_binary_postops)
                 f8_e4m3_cvt_ = utils::make_unique<fp8_conversion_e4m3_t>(this,
                         vmm_fp8_emu_aux1(), vmm_fp8_emu_aux2(),
@@ -235,6 +237,7 @@ private:
     const reg64_savable_t reg_buf_aux {regscratchpad_, abi_param1};
     const reg64_savable_backup_t reg_buf_aux_backup {reg_buf_aux};
     const reg64_savable_t reg_aux_compensation {regscratchpad_, rbx, r29};
+    const reg64_savable_t reg_buf_A {regscratchpad_, rbx, r26};
 
     // Base / working pointers for the per-(M,N) f32 compensation buffer used
     // by apply_per_mn_compensation. Lifecycle mirrors reg_C / reg_aux_C.
@@ -286,6 +289,7 @@ private:
     Xbyak::Opmask kmask_fp8_aux = Xbyak::Opmask(5);
     // Used for both AMX GEMM and GEMV code paths.
     Xbyak::Opmask rd_tail_mask = Xbyak::Opmask(6);
+    Xbyak::Opmask fp8_tail_mask = Xbyak::Opmask(7);
 
     static int get_max_effective_vregs(const brgemm_desc_t &brg) {
         auto used_vregs = 0;
@@ -425,6 +429,8 @@ private:
     void fp8_to_f16_upconvert(int num_rows, int tile_num_col_bytes,
             reg64_t reg_base, dim_t offset, reg64_t reg_data_stride,
             data_type_t dt, bool is_rd_tail);
+    void fp8_to_f16_upconvert(
+            data_type_t dt, const Vmm &vmm_out, const Operand &op_in);
     void fp8_to_f16_upconvert_to_vnni(int num_rows, int tile_num_col_bytes,
             reg64_t reg_base, dim_t offset, reg64_t reg_data_stride,
             data_type_t dt, bool is_rd_tail);
@@ -465,6 +471,8 @@ private:
             matrix_kind_t mk);
     void maybe_tileloadd_nt(matrix_kind_t matrix_kind, int idx, dim_t offset,
             bool is_rd_tail, bool is_tail);
+    void maybe_pre_process_buf_A(reg64_t reg_base, const int bd_b,
+            const int bd_e, const int rd_block);
     void load_scales_to_vmm(const data_type_t type_in, const Vmm &scales,
             const Xbyak::Operand &op, bool is_ld_tail, bool is_single_scale);
     void dot_product(Vmm v1, Vmm v2, Vmm v3);
@@ -527,6 +535,7 @@ private:
     dim_t ldb_per_mn_comp_offset(
             int ld_block2, bool is_tail = false) const noexcept;
     dim_t bdb_per_mn_comp_offset(int bd_block2) const noexcept;
+    dim_t buf_A_offset(int bd, int rd) const noexcept;
 
     bool vpad_exist = false;
     bool need_comp_pads = false;
@@ -790,6 +799,12 @@ dim_t jit_brgemm_kernel_t<Wmm>::bdb_per_mn_comp_offset(
         int bd_block2) const noexcept {
     return sizeof(float) * bd_block2 * brg.bd_block * brg.LDC;
 }
+
+template <typename Wmm>
+dim_t jit_brgemm_kernel_t<Wmm>::buf_A_offset(int bd, int rd) const noexcept {
+    return bd * zmm_width_in_bytes_ + sizeof(float16_t) * rd;
+}
+
 template <typename Wmm>
 template <typename U>
 U jit_brgemm_kernel_t<Wmm>::vmm_mask(const U vmm_in, bool mask_flag, bool store,
@@ -1140,6 +1155,11 @@ void jit_brgemm_kernel_t<Wmm>::read_params() {
         reg_D_shift_bytes.save();
     }
 
+    if (brg.is_fp8_via_convert_non_amx() && brg.fp8_with_f16_vnni_block) {
+        mov(reg_buf_A, ptr[param1 + GET_OFF(ptr_buf)]);
+        reg_buf_A.save();
+    }
+
     mov(reg_do_post_ops, ptr[param1 + GET_OFF(do_post_ops)]);
     reg_do_post_ops.save();
 
@@ -1178,6 +1198,21 @@ void jit_brgemm_kernel_t<Wmm>::zero_accumulators(int bd_block2,
             uni_vpxor(vmm, vmm, vmm);
         }
     }
+}
+
+template <typename Wmm>
+void jit_brgemm_kernel_t<Wmm>::fp8_to_f16_upconvert(
+        data_type_t dt, const Vmm &vmm_out, const Operand &op_in) {
+    if (!one_of(dt, data_type::f8_e4m3, data_type::f8_e5m2)) {
+        assert(!"unsupported data type");
+        return;
+    }
+
+    if (dt == data_type::f8_e4m3)
+        f8_e4m3_cvt_->vcvt_f8_to_f16(vmm_out, op_in);
+    else if (dt == data_type::f8_e5m2)
+        // skip setting q nan bit for performance purpose
+        f8_e5m2_cvt_->vcvt_f8_to_f16_skip_q_nan(vmm_out, op_in);
 }
 
 // This method up-converts the data from bf8 to f16 and saves at reg_buf.
@@ -2772,6 +2807,26 @@ bool jit_brgemm_kernel_t<Wmm>::maybe_pre_process_k_tail(bool is_rd_tail,
 }
 
 template <typename Wmm>
+void jit_brgemm_kernel_t<Wmm>::maybe_pre_process_buf_A(
+        reg64_t reg_base, const int bd_b, const int bd_e, const int rd_block) {
+    if (!(brg.is_fp8_via_convert_non_amx() && brg.fp8_with_f16_vnni_block))
+        return;
+
+    reg64_savable_guard_t reg_fp8_buf_guard({&reg64_fp8_aux, &reg_buf_A});
+
+    reg_buf_A.restore();
+
+    for (int bd = bd_b; bd < bd_e; bd++) {
+        const auto offset = A_offset(bd, 0);
+        auto vmm = vmm_tmp(0);
+        auto xmm_tmp = Xmm(vmm.getIdx());
+        load_bytes(xmm_tmp, reg_base, offset, rd_block);
+        fp8_to_f16_upconvert(brg.dt_a, vmm, xmm_tmp);
+        vmovdqu16(ptr[reg_buf_A + bd * zmm_width_in_bytes_], vmm);
+    }
+}
+
+template <typename Wmm>
 void jit_brgemm_kernel_t<Wmm>::gemm_microkernel_amx(int bd_block2,
         bool is_bdb_tail, int ld_block2, bool is_rd_tail, bool is_ld_tail) {
     auto tdpbxxd = [this](const Tmm &x1, const Tmm &x2, const Tmm &x3) {
@@ -3102,7 +3157,11 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
                 = have_to_load_bytes ? rows_for_rd_tail : 0;
         const auto bd_by_load_bytes = (bd >= bd_e - rows_by_load_bytes
                 || brg.brgattr.wary_A_k_tail_read);
-        const auto is_tail = have_to_load_bytes && bd_by_load_bytes;
+        const auto is_pre_process_fp8
+                = one_of(dt, data_type::f8_e5m2, data_type::f8_e4m3)
+                && brg.fp8_with_f16_vnni_block;
+        const auto is_tail
+                = have_to_load_bytes && bd_by_load_bytes && !is_pre_process_fp8;
         if (is_tail) {
             Xmm xmm_tmp = Xmm(vmm_bcast.getIdx());
             load_bytes(
@@ -3116,9 +3175,15 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
                     vbcstnebf162ps(vmm_bcast, ptr[reg_aux_A + offset]);
                 else
                     uni_vpbroadcastd(vmm_bcast, ptr[reg_aux_A + offset]);
-            } else if (one_of(dt, data_type::s8, data_type::u8,
-                               data_type::f8_e5m2, data_type::f8_e4m3)) {
+            } else if (one_of(dt, data_type::s8, data_type::u8)) {
                 uni_vpbroadcastd(vmm_bcast, ptr[reg_aux_A + offset]);
+            } else if (one_of(dt, data_type::f8_e5m2, data_type::f8_e4m3)) {
+                if (brg.fp8_with_f16_vnni_block) {
+                    reg_buf_A.restore();
+                    const auto buf_offset = buf_A_offset(bd, rd);
+                    uni_vpbroadcastd(vmm_bcast, ptr[reg_buf_A + buf_offset]);
+                } else
+                    uni_vpbroadcastd(vmm_bcast, ptr[reg_aux_A + offset]);
             } else if (dt == data_type::f16) {
                 if (brg.isa_impl == avx10_2) {
                     uni_vpbroadcastd(vmm_bcast, ptr[reg_aux_A + offset]);
@@ -3143,8 +3208,10 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
                         brg.dt_b == data_type::f16, brg.isa_impl == avx10_2)
                 && IMPLICATION(brg.dt_b == data_type::bf16,
                         brg.isa_impl != avx2_vnni_2);
+        const auto tail_mask
+                = brg.fp8_with_f16_vnni_block ? fp8_tail_mask : ld_tail_mask;
         const Vmm vmm_load
-                = vmm_mask(load(vmm_load_idx), is_ld_tail, false, ld_tail_mask);
+                = vmm_mask(load(vmm_load_idx), is_ld_tail, false, tail_mask);
         const auto addr = ptr[reg_aux_B + B_offset(ld, rd)];
         // Note: Assuming the tails are properly padded/blocked for
         // avx2_vnni_2 with xf16 data type, as the B matrix is generally
@@ -3191,6 +3258,11 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
             } else {
                 uni_vmovups(vmm_load, addr);
             }
+        } else if (one_of(brg.dt_b, data_type::f8_e5m2, data_type::f8_e4m3)) {
+            if (brg.fp8_with_f16_vnni_block)
+                fp8_to_f16_upconvert(brg.dt_b, vmm_load, addr);
+            else
+                uni_vmovups(vmm_load, addr);
         } else if (is_ld_tail) {
             if (is_superset(brg.isa_impl, avx512_core)) {
                 uni_vmovups(vmm_load, addr);
@@ -3220,13 +3292,17 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
 
     if (brg.is_fp8_via_convert()) reg64_fp8_aux.save();
 
+    maybe_pre_process_buf_A(
+            reg_aux_A, bd_b, bd_e, is_rd_tail ? brg.rdb_tail : rd_loop);
+
     for (int rd = 0; rd < rd_loop; rd += brg.rd_step) {
         if (brg.n_bcast_1_load) {
             for (int bd = bd_b; bd < bd_e && !is_emdbd; bd++)
                 broadcast_A(bcst(bd), bd, rd);
             for (int ld = 0; ld < ld_block2; ld++) {
                 load_B(0, rd, ld);
-                if (brg.is_fp8_via_convert_non_amx())
+                if (brg.is_fp8_via_convert_non_amx()
+                        && !brg.fp8_with_f16_vnni_block)
                     maybe_pre_process_data(brg.dt_b, load(), vmm_fp8_load());
                 for (int bd = bd_b; bd < bd_e; bd++) {
                     auto vmm = accm(ld_block2, bd, ld);
@@ -3234,7 +3310,8 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
                         uni_vfmadd231ps(vmm, load(),
                                 ptr_b[reg_aux_A + A_offset(bd, rd)]);
                     else {
-                        if (brg.is_fp8_via_convert_non_amx()) {
+                        if (brg.is_fp8_via_convert_non_amx()
+                                && !brg.fp8_with_f16_vnni_block) {
                             broadcast_A(bcst(bd), bd, rd);
                             maybe_pre_process_data(
                                     brg.dt_a, bcst(bd), vmm_fp8_bcst());
@@ -3254,7 +3331,8 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
 
             for (int bd = bd_b; bd < bd_e; bd++) {
                 if (!is_emdbd) broadcast_A(bcst(), bd, rd);
-                if (brg.is_fp8_via_convert_non_amx())
+                if (brg.is_fp8_via_convert_non_amx()
+                        && !brg.fp8_with_f16_vnni_block)
                     maybe_pre_process_data(brg.dt_a, bcst(), vmm_fp8_bcst());
                 if (prefetch_count_B < ld_block2) {
                     const dim_t prefetch_offset
@@ -3281,7 +3359,8 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
                         uni_vfmadd231ps(vmm, load(ld),
                                 ptr_b[reg_aux_A + A_offset(bd, rd)]);
                     else {
-                        if (brg.is_fp8_via_convert_non_amx()) {
+                        if (brg.is_fp8_via_convert_non_amx()
+                                && !brg.fp8_with_f16_vnni_block) {
                             load_B(ld, rd, ld);
                             maybe_pre_process_data(
                                     brg.dt_b, load(ld), vmm_fp8_load());
@@ -3788,6 +3867,12 @@ void jit_brgemm_kernel_t<Wmm>::generate() {
             kmovq(ld_full_mask, reg_mask);
             mov(reg_mask, tail_mask);
             kmovq(ld_tail_mask, reg_mask);
+
+            if (brg.fp8_with_f16_vnni_block) {
+                const auto f8_tail = size_t((1 << (brg.ldb_tail * 2)) - 1);
+                mov(reg_mask.cvt32(), f8_tail);
+                kmovd(fp8_tail_mask, reg_mask.cvt32());
+            }
         } else {
             const auto partial_mask
                     = brg.transA ? size_t((1 << brg.gemv_tail) - 1) : 1;

@@ -1813,6 +1813,7 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             && isa == avx512_core_amx;
     jcp.wei_plain = everyone_is(true, jcp.wei_dt == data_type::f32,
             is_superset(isa, avx512_core), weights_d.is_plain());
+    jcp.req_fp8_convert_wsp = jcp.is_fp8_convert && !is_amx(isa);
     if (jcp.wei_plain)
         CHECK(pick_tags(jcp, src_md, weights_md, dst_md, bias_md));
 
@@ -1820,8 +1821,9 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             ? jcp.dst_dt
             : utils::one_of(true, jcp.is_f32_bf16, jcp.is_f32_f16) ? jcp.src_dt
                                                                    : jcp.wei_dt;
+    const bool req_emulation = utils::one_of(isa, avx10_1_512, avx10_2);
     const data_type_t vnni_block_dt
-            = get_mac_emu_data_type(vnni_dt, isa, isa == avx10_1_512);
+            = get_mac_emu_data_type(vnni_dt, isa, req_emulation);
     jcp.vnni_block
             = static_cast<int>(data_type_vnni_granularity(vnni_block_dt));
 
@@ -1927,7 +1929,7 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             VERBOSE_ISA_DT_MISMATCH);
     VDISPATCH_CONV_IC(
             IMPLICATION(jcp.wei_dt == f8_e5m2,
-                    mayiuse(avx512_core_amx_fp16) || mayiuse(avx10_2_amx_2)),
+                    mayiuse(avx512_core_amx_fp16) || mayiuse(avx10_2)),
             VERBOSE_ISA_DT_MISMATCH);
     const bool is_f32
             = utils::everyone_is(f32, jcp.src_dt, jcp.wei_dt, jcp.dst_dt);
@@ -2187,7 +2189,9 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     bool relo_conv_weights_wi = true;
     const auto rd_wi = jcp.kw * jcp.ic;
     const auto rnd_rd_wi = (float)rnd_up(rd_wi, jcp.simd_w);
-    if (!jcp.wei_plain && relo_supported_isa && relo_reasonable_isa) {
+    // TODO: enable relo for fp8 with f16 vnni block later
+    if (!jcp.wei_plain && !(jcp.is_fp8 && jcp.vnni_block == 2)
+            && relo_supported_isa && relo_reasonable_isa) {
         if (jcp.vnni_block == 1 /* For f32 weights are in needed layout */
                 || (jcp.ic % jcp.vnni_block == 0
                         && IMPLICATION(
@@ -2509,6 +2513,11 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             = static_cast<dim_t>(jcp.M) * jcp.N * (jcp.is_bf32 ? 1 : 2)
             > 8 * 1024;
 
+    jcp.fp8_convert_wsp_size = static_cast<dim_t>(sizeof(float16_t))
+            * isa_max_vlen(jcp.isa)
+            * nstl::max(
+                    static_cast<dim_t>(isa_num_vregs(jcp.isa)), jcp.ow_block);
+
     VDISPATCH_CONV_IC(IMPLICATION(jcp.is_bf32, jcp.use_uker),
             "cannot use unrolled kernel for current datatype configuration");
 
@@ -2738,6 +2747,11 @@ status_t init_1x1_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             = static_cast<dim_t>(jcp.M) * jcp.N * (jcp.is_bf32 ? 1 : 2)
             > 8 * 1024;
 
+    jcp.fp8_convert_wsp_size = static_cast<dim_t>(sizeof(float16_t))
+            * isa_max_vlen(jcp.isa)
+            * nstl::max(
+                    static_cast<dim_t>(isa_num_vregs(jcp.isa)), jcp.ow_block);
+
     return status::success;
 }
 
@@ -2824,6 +2838,12 @@ status_t init_scratchpad(memory_tracking::registrar_t &scratchpad,
                 = nstl::min(scratchpad_limit_by_absolute_value,
                         scratchpad_limit_by_tensor_sizes);
         if (scratchpad.size() > scratchpad_limit) return status::unimplemented;
+    }
+
+    if (jcp.req_fp8_convert_wsp) {
+        scratchpad.book(key_brgemm_primitive_fp8_convert_wsp,
+                static_cast<size_t>(jcp.nthr) * jcp.fp8_convert_wsp_size,
+                sizeof(float16_t), 0, P4K);
     }
 
     return status::success;
