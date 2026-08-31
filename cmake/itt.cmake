@@ -21,6 +21,23 @@ if(itt_cmake_included)
 endif()
 set(itt_cmake_included true)
 
+# Canonical location of the ITT API copy bundled with oneDNN.
+set(ITTNOTIFY_ROOT "${PROJECT_SOURCE_DIR}/third_party/ittnotify"
+    CACHE INTERNAL "Location of the ITT API copy bundled with oneDNN")
+
+# DNNL_ITTAPI_INCLUDE_DIR is the user-facing knob and is never modified here:
+# empty means "use the bundled copy", non-empty means "use an external ITT API".
+# That emptiness is the single source of truth, checked directly wherever the
+# distinction matters (see src/common/CMakeLists.txt).
+#
+# ITT_INCLUDE_DIR is the resolved include path derived from it. It is set before
+# the early returns below so that it is available on every architecture.
+if(DNNL_ITTAPI_INCLUDE_DIR)
+    file(TO_CMAKE_PATH "${DNNL_ITTAPI_INCLUDE_DIR}" ITT_INCLUDE_DIR)
+else()
+    set(ITT_INCLUDE_DIR "${ITTNOTIFY_ROOT}")
+endif()
+
 # ITT API is only used by these features.
 if(NOT (DNNL_ENABLE_ITT_TASKS OR DNNL_ENABLE_JIT_PROFILING))
     return()
@@ -32,24 +49,37 @@ if(NOT (DNNL_TARGET_ARCH STREQUAL "X64" OR DNNL_TARGET_ARCH STREQUAL "AARCH64"))
     return()
 endif()
 
-file(TO_CMAKE_PATH "${DNNL_ITTAPI_INCLUDE_DIR}" DNNL_ITTAPI_INCLUDE_DIR)
-
-if(NOT EXISTS "${DNNL_ITTAPI_INCLUDE_DIR}/ittnotify/ittnotify.h")
+if(NOT EXISTS "${ITT_INCLUDE_DIR}/ittnotify/ittnotify.h")
     message(FATAL_ERROR
         "ITT API headers not found: "
-        "'${DNNL_ITTAPI_INCLUDE_DIR}/ittnotify/ittnotify.h' does not exist. "
+        "'${ITT_INCLUDE_DIR}/ittnotify/ittnotify.h' does not exist. "
         "Set DNNL_ITTAPI_INCLUDE_DIR to a directory that contains the "
         "'ittnotify/' subdirectory with 'ittnotify.h' and 'jitprofiling.h'.")
 endif()
 
-# Report bundled vs external. The actual decision on whether to compile the
-# bundled sources is made (using the same path comparison) in
-# src/common/CMakeLists.txt.
-get_filename_component(_itt_given "${DNNL_ITTAPI_INCLUDE_DIR}" ABSOLUTE)
-get_filename_component(_itt_bundled "${ITTNOTIFY_ROOT}" ABSOLUTE)
-if(_itt_given STREQUAL _itt_bundled)
-    message(STATUS "ITT API: using bundled copy (${DNNL_ITTAPI_INCLUDE_DIR})")
-else()
-    message(STATUS "ITT API: using external headers (${DNNL_ITTAPI_INCLUDE_DIR}); "
+if(DNNL_ITTAPI_INCLUDE_DIR)
+    message(STATUS "ITT API: using external headers (${ITT_INCLUDE_DIR}); "
         "the surrounding project must provide the ITT implementation")
+else()
+    message(STATUS "ITT API: using bundled copy (${ITT_INCLUDE_DIR})")
+endif()
+
+# With an external ITT API the bundled implementation is not compiled (see
+# src/common/CMakeLists.txt), so the __itt_*/iJIT_* symbols must come from
+# elsewhere. DNNL_ITTAPI_LIBRARY, when set, is linked into libdnnl; it may be a
+# path to a library or the name of a CMake target.
+#
+# Leaving it empty is legitimate: a STATIC libdnnl is meant to be absorbed into
+# a larger binary that provides ITT itself, and even a SHARED libdnnl works when
+# the loading executable exports the symbols (e.g. ITT linked with -rdynamic).
+# For a SHARED libdnnl without an explicit library, though, the unresolved
+# references propagate to every consumer at link time, so warn about it.
+if(DNNL_ITTAPI_INCLUDE_DIR AND NOT DNNL_ITTAPI_LIBRARY
+        AND DNNL_LIBRARY_TYPE STREQUAL "SHARED")
+    message(WARNING
+        "ITT API: external headers are used for a SHARED libdnnl, but "
+        "DNNL_ITTAPI_LIBRARY is not set. The resulting library will have "
+        "undefined ITT symbols and linking against it will fail unless the "
+        "consumer provides an ITT implementation and exports those symbols. "
+        "Set DNNL_ITTAPI_LIBRARY to link an ITT implementation into libdnnl.")
 endif()
