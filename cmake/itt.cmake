@@ -72,16 +72,12 @@ endif()
 # path to a library or the name of a CMake target.
 #
 # Leaving it empty is legitimate: a STATIC libdnnl is meant to be absorbed into
-# a larger binary that provides ITT itself, and even a SHARED libdnnl works when
-# the loading executable exports the symbols (e.g. ITT linked with -rdynamic).
-# For a SHARED libdnnl without an explicit library, though, the unresolved
-# references propagate to every consumer at link time, so warn about it.
+# a larger binary that provides ITT itself. On Windows and macOS, shared-library
+# linkers reject unresolved ITT symbols, so an implementation is required.
 if(DNNL_ITTAPI_INCLUDE_DIR AND NOT DNNL_ITTAPI_LIBRARY
-        AND DNNL_LIBRARY_TYPE STREQUAL "SHARED")
-    message(WARNING
+        AND DNNL_LIBRARY_TYPE STREQUAL "SHARED" AND (WIN32 OR APPLE))
+    message(FATAL_ERROR
         "ITT API: external headers are used for a SHARED libdnnl, but "
-        "DNNL_ITTAPI_LIBRARY is not set. The resulting library will have "
-        "undefined ITT symbols and linking against it will fail unless the "
-        "consumer provides an ITT implementation and exports those symbols. "
+        "DNNL_ITTAPI_LIBRARY is not set. "
         "Set DNNL_ITTAPI_LIBRARY to link an ITT implementation into libdnnl.")
 endif()
