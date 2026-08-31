@@ -49,7 +49,9 @@ if(NOT (DNNL_TARGET_ARCH STREQUAL "X64" OR DNNL_TARGET_ARCH STREQUAL "AARCH64"))
     return()
 endif()
 
-if(NOT EXISTS "${ITT_INCLUDE_DIR}/ittnotify/ittnotify.h")
+if(NOT EXISTS "${ITT_INCLUDE_DIR}/ittnotify/ittnotify.h"
+        OR (DNNL_ENABLE_JIT_PROFILING
+            AND NOT EXISTS "${ITT_INCLUDE_DIR}/ittnotify/jitprofiling.h"))
     message(FATAL_ERROR
         "ITT API headers not found: "
         "'${ITT_INCLUDE_DIR}/ittnotify/ittnotify.h' does not exist. "
