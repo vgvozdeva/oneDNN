@@ -215,6 +215,21 @@ onednn_option(ENABLE_ITT_TASKS ON
     (on by default). VTune Profiler can group profiling results based
     on those ITT tasks and show corresponding timeline information.")
 
+onednn_option(ITTAPI_INCLUDE_DIR ""
+    "Path to the ITT API headers. Leave empty (default) to use the copy
+    bundled in third_party/ittnotify, whose sources are compiled into libdnnl.
+    Point it to an externally provided ITT API (a directory containing
+    'ittnotify/ittnotify.h') to build against those headers and let the
+    surrounding project provide the ITT implementation instead of compiling the
+    bundled sources.")
+
+onednn_option(ITTAPI_LIBRARY ""
+    "ITT API implementation to link into libdnnl when ITTAPI_INCLUDE_DIR points
+    to an external ITT API. Accepts a path to a library or the name of a CMake
+    target. Leave empty (default) to let the surrounding project or the loading
+    executable provide the ITT symbols; note that a SHARED libdnnl built this
+    way has undefined ITT symbols that every consumer must resolve.")
+
 onednn_option(ENABLE_GRAPH_DUMP ON "Enables saving subgraphs defined using
     Graph API to disk when ONEDNN_GRAPH_DUMP environment variable is set.")
 

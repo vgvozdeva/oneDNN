@@ -26,8 +26,9 @@ file(GLOB HEADERS_SUBDIR
     )
 
 if(DNNL_ENABLE_JIT_PROFILING OR DNNL_ENABLE_ITT_TASKS)
-    set(ITTNOTIFY_ROOT "${PROJECT_SOURCE_DIR}/third_party/ittnotify")
-    include_directories_with_host_compiler(${ITTNOTIFY_ROOT})
+    # ITT_INCLUDE_DIR is resolved in cmake/itt.cmake (bundled copy by default,
+    # DNNL_ITTAPI_INCLUDE_DIR when an external ITT API is requested).
+    include_directories_with_host_compiler(${ITT_INCLUDE_DIR})
 endif()
 if(DNNL_GPU_VENDOR STREQUAL "INTEL" AND DNNL_GPU_RUNTIME MATCHES "^(OCL|SYCL|DPCPP)$")
     include_directories_with_host_compiler(${PROJECT_SOURCE_DIR}/third_party/mdapi)
@@ -85,6 +86,12 @@ if(DNNL_ENABLE_JIT_PROFILING OR DNNL_ENABLE_ITT_TASKS)
     if (UNIX AND NOT APPLE)
         # Not every compiler adds -ldl automatically
         list(APPEND EXTRA_SHARED_LIBS "${CMAKE_DL_LIBS}")
+    endif()
+
+    # An external ITT API supplies only headers; link the implementation the
+    # user pointed us at, if any (see cmake/itt.cmake).
+    if(DNNL_ITTAPI_INCLUDE_DIR AND DNNL_ITTAPI_LIBRARY)
+        list(APPEND EXTRA_STATIC_LIBS ${DNNL_ITTAPI_LIBRARY})
     endif()
 endif()
 
